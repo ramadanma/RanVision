@@ -1,22 +1,52 @@
-"""
-Phase 2: Replace with actual YOLO pose inference.
+"""YOLO pose inference. One model instance per GPU, lazily initialized."""
+import logging
+import threading
 
-COCO keypoint indices:
-0=nose, 1=left_eye, 2=right_eye, 3=left_ear, 4=right_ear,
-5=left_shoulder, 6=right_shoulder, 7=left_elbow, 8=right_elbow,
-9=left_wrist, 10=right_wrist, 11=left_hip, 12=right_hip,
-13=left_knee, 14=right_knee, 15=left_ankle, 16=right_ankle
-
-Returns list of detections, each:
-{
-    "track_id": int,
-    "bbox": [x1, y1, x2, y2],
-    "keypoints": [[x, y, conf], ...] (17 points)
-}
-"""
 import numpy as np
 
+logger = logging.getLogger(__name__)
 
-def infer(frame: np.ndarray) -> list[dict]:
-    # Phase 2: call ultralytics YOLO pose model here
-    return []
+_lock = threading.Lock()
+_models: dict[int, object] = {}  # device_id -> YOLO model instance
+
+
+def _get_model(device: int):
+    with _lock:
+        if device not in _models:
+            from ultralytics import YOLO
+            from app.config import settings
+            model = YOLO(settings.YOLO_MODEL_PATH)
+            model.to(f"cuda:{device}")
+            _models[device] = model
+            logger.info("YOLO model loaded on cuda:%d", device)
+        return _models[device]
+
+
+def infer(frame: np.ndarray, device: int = 0) -> list[dict]:
+    """
+    Run YOLO pose inference on a single frame.
+    Returns list of detections:
+      [{"track_id": int, "bbox": [x1,y1,x2,y2], "keypoints": [[x,y,conf]×17]}, ...]
+    """
+    try:
+        model = _get_model(device)
+        results = model.track(frame, persist=True, verbose=False, half=True)
+        if not results:
+            return []
+        result = results[0]
+        if result.boxes is None or result.keypoints is None:
+            return []
+
+        detections = []
+        for i in range(len(result.boxes)):
+            box = result.boxes[i]
+            if box.id is None:
+                continue
+            track_id = int(box.id.item())
+            bbox = box.xyxy[0].tolist()
+            kps = result.keypoints[i].data[0].tolist()  # [[x, y, conf] * 17]
+            detections.append({"track_id": track_id, "bbox": bbox, "keypoints": kps})
+        return detections
+    except Exception as e:
+        logger.error("YOLO infer error (device=%d): %s", device, e)
+        return []

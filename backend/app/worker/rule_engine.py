@@ -1,9 +1,4 @@
-"""
-Rule evaluation engine. Called per frame with detections.
-
-Phase 1: skeleton with data structures ready.
-Phase 2: fill in actual evaluation logic using keypoint data.
-"""
+"""Rule evaluation engine — called per frame with detections."""
 import json
 import time
 from dataclasses import dataclass, field
@@ -11,30 +6,30 @@ from typing import Any
 
 import numpy as np
 
+TRIGGER_COOLDOWN = 60.0  # seconds between repeated triggers for same track+rule
+
 
 @dataclass
 class PersonState:
     track_id: int
-    zone_entry_time: dict[int, float] = field(default_factory=dict)  # zone_id -> timestamp
-    in_zone: dict[int, bool] = field(default_factory=dict)          # zone_id -> bool
+    zone_entry_time: dict[int, float] = field(default_factory=dict)   # zone_id -> timestamp
+    in_zone: dict[int, bool] = field(default_factory=dict)
+    last_trigger: dict[tuple, float] = field(default_factory=dict)    # (rule_id, zone_id) -> ts
 
 
 class RuleEngine:
     def __init__(self):
-        # person_states[source_id][track_id] = PersonState
         self._states: dict[int, dict[int, PersonState]] = {}
 
     def _get_state(self, source_id: int, track_id: int) -> PersonState:
-        if source_id not in self._states:
-            self._states[source_id] = {}
-        if track_id not in self._states[source_id]:
-            self._states[source_id][track_id] = PersonState(track_id=track_id)
-        return self._states[source_id][track_id]
+        src = self._states.setdefault(source_id, {})
+        if track_id not in src:
+            src[track_id] = PersonState(track_id=track_id)
+        return src[track_id]
 
     def _cleanup_gone_tracks(self, source_id: int, active_ids: set[int]) -> None:
         if source_id in self._states:
-            gone = set(self._states[source_id].keys()) - active_ids
-            for tid in gone:
+            for tid in set(self._states[source_id]) - active_ids:
                 del self._states[source_id][tid]
 
     def evaluate(
@@ -46,17 +41,13 @@ class RuleEngine:
         source_id: int,
         on_trigger_callback=None,
     ) -> list[dict]:
-        """
-        Evaluate all rules for all detected persons against all zones.
-        Returns list of triggered rule events.
-        """
         triggered = []
         active_ids = {d["track_id"] for d in detections}
         self._cleanup_gone_tracks(source_id, active_ids)
 
         for detection in detections:
             track_id = detection["track_id"]
-            keypoints = detection.get("keypoints", [])  # [[x, y, conf], ...]
+            keypoints = detection.get("keypoints", [])
             state = self._get_state(source_id, track_id)
 
             for zone in zones:
@@ -64,10 +55,8 @@ class RuleEngine:
                 if polygon is None:
                     continue
 
-                # Check if any keypoint is inside zone (simplified: use bbox center)
                 in_zone = self._person_in_zone(detection, polygon, frame)
 
-                # Track zone entry time
                 if in_zone and zone.id not in state.zone_entry_time:
                     state.zone_entry_time[zone.id] = time.time()
                 elif not in_zone:
@@ -80,8 +69,15 @@ class RuleEngine:
                 for rule in zone.rules:
                     if not rule.is_enabled:
                         continue
+                    # Cooldown check
+                    cooldown_key = (rule.id, zone.id)
+                    last = state.last_trigger.get(cooldown_key, 0)
+                    if time.time() - last < TRIGGER_COOLDOWN:
+                        continue
+
                     event = self._eval_rule(rule, detection, state, zone.id, identities.get(track_id))
                     if event:
+                        state.last_trigger[cooldown_key] = time.time()
                         triggered.append(event)
                         if on_trigger_callback:
                             on_trigger_callback(event)
@@ -89,9 +85,8 @@ class RuleEngine:
         return triggered
 
     def _load_polygon(self, zone, frame: np.ndarray) -> np.ndarray | None:
-        """Load polygon as pixel coords from zone.npy_path or polygon_json."""
         try:
-            if zone.npy_path:
+            if zone.npy_path and __import__("os").path.exists(zone.npy_path):
                 poly_norm = np.load(zone.npy_path)
             else:
                 poly_norm = np.array(json.loads(zone.polygon_json), dtype=np.float32)
@@ -101,24 +96,32 @@ class RuleEngine:
             return None
 
     def _person_in_zone(self, detection: dict, polygon: np.ndarray, frame: np.ndarray) -> bool:
-        """Check if person bbox center is inside polygon."""
+        """Use rule keypoints if available, otherwise fall back to bbox center."""
         import cv2
+        kps = detection.get("keypoints", [])
+        if kps:
+            # Check if hip midpoint (11, 12) or bbox center is inside zone
+            hip_points = []
+            for idx in [11, 12]:
+                if idx < len(kps) and kps[idx][2] > 0.3:
+                    hip_points.append((int(kps[idx][0]), int(kps[idx][1])))
+            if hip_points:
+                cx = int(sum(p[0] for p in hip_points) / len(hip_points))
+                cy = int(sum(p[1] for p in hip_points) / len(hip_points))
+                return cv2.pointPolygonTest(polygon, (cx, cy), False) >= 0
+
         bbox = detection.get("bbox", [])
-        if len(bbox) < 4:
-            return False
-        cx = int((bbox[0] + bbox[2]) / 2)
-        cy = int((bbox[1] + bbox[3]) / 2)
-        return cv2.pointPolygonTest(polygon, (cx, cy), False) >= 0
+        if len(bbox) >= 4:
+            cx = int((bbox[0] + bbox[2]) / 2)
+            cy = int((bbox[1] + bbox[3]) / 2)
+            return cv2.pointPolygonTest(polygon, (cx, cy), False) >= 0
+        return False
 
     def _eval_rule(self, rule, detection: dict, state: PersonState, zone_id: int, person_name: str | None) -> dict | None:
-        """
-        Evaluate a single rule. Returns trigger event dict or None.
-        Phase 2: implement actual keypoint/angle math here.
-        """
         if rule.rule_type == "dwell_time":
             return self._eval_dwell(rule, state, zone_id, detection, person_name)
         elif rule.rule_type == "limb_angle":
-            return self._eval_angle(rule, detection, person_name)
+            return self._eval_angle(rule, detection, zone_id, person_name)
         return None
 
     def _eval_dwell(self, rule, state: PersonState, zone_id: int, detection: dict, person_name: str | None) -> dict | None:
@@ -128,8 +131,7 @@ class RuleEngine:
         elapsed = time.time() - entry_time
         threshold = rule.dwell_seconds or 0
         op = rule.dwell_op or "gt"
-        triggered = (op == "gt" and elapsed > threshold) or (op == "lt" and elapsed < threshold)
-        if not triggered:
+        if not ((op == "gt" and elapsed > threshold) or (op == "lt" and elapsed < threshold)):
             return None
         return {
             "rule_id": rule.id,
@@ -139,10 +141,54 @@ class RuleEngine:
             "snapshot": {"elapsed_seconds": round(elapsed, 1), "threshold": threshold, "op": op},
         }
 
-    def _eval_angle(self, rule, detection: dict, person_name: str | None) -> dict | None:
-        # Phase 2: compute arm angle from keypoints using dot product
-        # keypoints indices: left arm = [5,7,9], right arm = [6,8,10]
-        return None
+    def _eval_angle(self, rule, detection: dict, zone_id: int, person_name: str | None) -> dict | None:
+        """
+        Compute arm angle at elbow: angle between (shoulder→elbow) and (elbow→wrist).
+        left arm:  keypoints [5, 7, 9]
+        right arm: keypoints [6, 8, 10]
+        """
+        kps = detection.get("keypoints", [])
+        if len(kps) < 17:
+            return None
+
+        arm_side = rule.arm_side or "both"
+        angle_threshold = rule.angle_degrees or 90
+        op = rule.angle_op or "lt"
+
+        def _angle(p1, elbow, p3) -> float | None:
+            if p1[2] < 0.3 or elbow[2] < 0.3 or p3[2] < 0.3:
+                return None
+            v1 = np.array([p1[0] - elbow[0], p1[1] - elbow[1]], dtype=float)
+            v2 = np.array([p3[0] - elbow[0], p3[1] - elbow[1]], dtype=float)
+            n1, n2 = np.linalg.norm(v1), np.linalg.norm(v2)
+            if n1 < 1e-6 or n2 < 1e-6:
+                return None
+            cos_a = np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0)
+            return float(np.degrees(np.arccos(cos_a)))
+
+        angles = []
+        if arm_side in ("left", "both"):
+            a = _angle(kps[5], kps[7], kps[9])
+            if a is not None:
+                angles.append(("left", a))
+        if arm_side in ("right", "both"):
+            a = _angle(kps[6], kps[8], kps[10])
+            if a is not None:
+                angles.append(("right", a))
+
+        triggered = [(side, a) for side, a in angles
+                     if (op == "lt" and a < angle_threshold) or (op == "gt" and a > angle_threshold)]
+        if not triggered:
+            return None
+        side, angle = triggered[0]
+        return {
+            "rule_id": rule.id,
+            "zone_id": zone_id,
+            "track_id": detection["track_id"],
+            "person_name": person_name,
+            "snapshot": {"arm_side": side, "angle_degrees": round(angle, 1),
+                         "threshold": angle_threshold, "op": op},
+        }
 
 
 rule_engine = RuleEngine()

@@ -13,6 +13,18 @@ class Settings(BaseSettings):
     HLS_SEGMENTS_DIR: str = "hls_segments"
     UPLOADS_DIR: str = "uploads"
 
+    # Phase 2: ML inference
+    YOLO_MODEL_PATH: str = "yolov8n-pose.pt"  # auto-downloaded on first run
+    GPU_COUNT: int = 4                          # number of CUDA devices on server
+    FACE_SIM_THRESHOLD: float = 0.5            # cosine similarity threshold
+
+    # Phase 2: SMTP alert
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+
     @property
     def uploads_videos(self) -> str:
         return f"{self.UPLOADS_DIR}/videos"

@@ -2,7 +2,7 @@ import asyncio
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 
 from app.config import settings
@@ -30,6 +30,48 @@ async def get_manifest(
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Stream not started or not ready")
     return FileResponse(path, media_type="application/vnd.apple.mpegurl")
+
+
+@router.websocket("/{source_id}/ws")
+async def stream_ws(
+    source_id: int,
+    websocket: WebSocket,
+    token: str = Query(...),
+):
+    """WebSocket live stream: pushes JPEG frames as binary messages."""
+    from app.dependencies import decode_token
+    from app.database import AsyncSessionLocal
+    from app.services.frame_buffer import frame_buffer
+
+    # Authenticate via query-param token
+    user_id = decode_token(token)
+    if user_id is None:
+        await websocket.close(code=4001)
+        return
+
+    async with AsyncSessionLocal() as db:
+        try:
+            source = await source_service.get_source(db, source_id, user_id)
+        except HTTPException:
+            await websocket.close(code=4003)
+            return
+
+    if not source.is_active:
+        await websocket.close(code=4004)
+        return
+
+    await websocket.accept()
+    last_version = 0
+    try:
+        while True:
+            version, jpeg = frame_buffer.get(source_id)
+            if version > last_version and jpeg:
+                await websocket.send_bytes(jpeg)
+                last_version = version
+            else:
+                await asyncio.sleep(0.05)  # poll at 20fps max
+    except WebSocketDisconnect:
+        pass
 
 
 @router.get("/{source_id}/snapshot")

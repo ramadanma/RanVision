@@ -15,12 +15,9 @@ aiofiles>=23.2.0
 httpx>=0.27.0
 Pillow>=10.3.0
 
-# ─── Phase 2 ML 依赖（切换到 nvidia/cuda 基础镜像后取消注释）───
-# 版本必须三者对齐：torch CUDA 版本 = onnxruntime-gpu CUDA 版本 = 宿主机驱动
-#
+# ─── Phase 2 ML 依赖 ───
 # torch 须单独从 PyTorch 官方源安装（避免从 PyPI 装 CPU 版）：
 #   pip install torch==2.3.0 --index-url https://download.pytorch.org/whl/cu121
-#
-# ultralytics>=8.2.0           # YOLO pose 推理，自动依赖 torch
-# insightface>=0.7.3           # 人脸识别，依赖 onnxruntime-gpu
-# onnxruntime-gpu==1.18.0      # 须与 CUDA 12.1 对齐（1.18 支持 CUDA 12.x）
+ultralytics>=8.2.0
+insightface>=0.7.3
+onnxruntime-gpu==1.18.0

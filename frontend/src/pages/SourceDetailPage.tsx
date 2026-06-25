@@ -46,8 +46,6 @@ export default function SourceDetailPage() {
   if (loading) return <Spin style={{ padding: 40 }} />
   if (!source) return <div>源不存在</div>
 
-  const hlsSrc = `/api/v1/stream/${sourceId}/index.m3u8`
-
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
@@ -81,7 +79,7 @@ export default function SourceDetailPage() {
                   </Col>
                 </Row>
                 {source.is_active ? (
-                  <HlsPlayer src={hlsSrc} zones={zones} showOverlay={source.show_overlay} />
+                  <HlsPlayer sourceId={sourceId} zones={zones} showOverlay={source.show_overlay} />
                 ) : (
                   <div style={{ background: '#222', color: '#888', padding: 40, textAlign: 'center' }}>
                     流未启动，请在列表页点击「启动」

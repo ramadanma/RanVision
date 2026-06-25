@@ -72,7 +72,7 @@ async def start_source(
     from app.worker.worker_manager import worker_manager
     source = await source_service.get_source(db, source_id, current_user.id)
     hls_manager.start(source)
-    worker_manager.start(source_id)
+    worker_manager.start(source_id, source.user_id)
     source.is_active = True
     await db.commit()
     await db.refresh(source)

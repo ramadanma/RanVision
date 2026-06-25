@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
         for source in active_sources:
             try:
                 hls_manager.start(source)
-                worker_manager.start(source.id)
+                worker_manager.start(source.id, source.user_id)
                 logging.getLogger(__name__).info("Restored source %d on startup", source.id)
             except Exception as e:
                 logging.getLogger(__name__).warning("Failed to restore source %d: %s", source.id, e)

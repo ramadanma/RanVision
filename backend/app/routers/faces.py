@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends, File, Form, UploadFile, status
+import os
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -37,6 +40,18 @@ async def update_face(
 ):
     face = await face_service.get_face(db, face_id, current_user.id)
     return await face_service.update_face(db, face, body.person_name)
+
+
+@router.get("/{face_id}/photo")
+async def get_face_photo(
+    face_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    face = await face_service.get_face(db, face_id, current_user.id)
+    if not os.path.exists(face.photo_path):
+        raise HTTPException(status_code=404, detail="Photo file not found")
+    return FileResponse(face.photo_path)
 
 
 @router.delete("/{face_id}", status_code=status.HTTP_204_NO_CONTENT)
