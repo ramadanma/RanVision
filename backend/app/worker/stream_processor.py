@@ -115,13 +115,16 @@ class StreamProcessor(threading.Thread):
             logger.error("Cannot resolve capture URL for source %d, worker exiting", self.source_id)
             return
 
+        logger.info("StreamProcessor source %d opening: %s", self.source_id, url)
         cap = cv2.VideoCapture(url)
         if not cap.isOpened():
-            logger.error("Cannot open video for source %d", self.source_id)
+            logger.error("Cannot open video for source %d (url=%s)", self.source_id, url)
             return
+        logger.info("StreamProcessor source %d capture opened successfully", self.source_id)
 
         from app.services.frame_buffer import frame_buffer
         frame_count = 0
+        fail_count = 0
 
         try:
             while not self._stop_event.is_set():
@@ -137,15 +140,29 @@ class StreamProcessor(threading.Thread):
 
                 ret, frame = cap.read()
                 if not ret:
-                    time.sleep(0.1)
+                    fail_count += 1
+                    if fail_count >= 10:
+                        # EOF or stream drop — reopen
+                        logger.info("Reopening capture for source %d (EOF/disconnect after %d fails)", self.source_id, fail_count)
+                        cap.release()
+                        time.sleep(1)
+                        cap = cv2.VideoCapture(url)
+                        fail_count = 0
+                    else:
+                        time.sleep(0.1)
                     continue
-
+                fail_count = 0
                 frame_count += 1
 
-                # Push to WebSocket frame buffer at reduced fps
+                # Push every Nth frame to WebSocket buffer
                 if frame_count % self._PUSH_EVERY_N == 0:
                     _, jpeg_buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                     frame_buffer.push(self.source_id, jpeg_buf.tobytes())
+                    if frame_count == self._PUSH_EVERY_N:
+                        logger.info("First frame pushed to buffer for source %d", self.source_id)
+
+                if frame_count % 150 == 0:
+                    logger.info("StreamProcessor source %d alive: %d frames processed", self.source_id, frame_count)
 
                 detections = yolo_stub.infer(frame, device=self._device)
                 identities = insightface_stub.identify(frame, detections, self._known_faces)

@@ -62,16 +62,24 @@ async def stream_ws(
 
     logger.info("WebSocket client connected for source %d (user %d)", source_id, user_id)
     last_version = 0
+    empty_polls = 0
+    frames_sent = 0
     try:
         while True:
             version, jpeg = frame_buffer.get(source_id)
             if version > last_version and jpeg:
                 await websocket.send_bytes(jpeg)
                 last_version = version
+                frames_sent += 1
+                if frames_sent == 1:
+                    logger.info("WS source %d: first frame sent (v=%d, %d bytes)", source_id, version, len(jpeg))
             else:
+                empty_polls += 1
+                if empty_polls == 100:  # ~5 s of no frames
+                    logger.warning("WS source %d: buffer empty after 5s (version=%d)", source_id, version)
                 await asyncio.sleep(0.05)  # poll at up to 20 fps
     except WebSocketDisconnect:
-        logger.info("WebSocket client disconnected from source %d", source_id)
+        logger.info("WebSocket client disconnected from source %d (sent %d frames)", source_id, frames_sent)
     except Exception as e:
         logger.warning("WebSocket error for source %d: %s", source_id, e)
 
