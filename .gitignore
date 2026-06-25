@@ -147,3 +147,4 @@ backend/uploads/faces/
 backend/uploads/zones/
 frontend/node_modules/
 frontend/dist/
+docker-compose.yml
