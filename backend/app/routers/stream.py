@@ -44,14 +44,28 @@ async def get_snapshot(
         raise HTTPException(status_code=404, detail="Stream not started")
 
     def _grab():
-        import cv2
-        cap = cv2.VideoCapture(manifest)
-        ret, frame = cap.read()
-        cap.release()
-        if not ret:
+        import glob, subprocess, tempfile
+        segment_dir = os.path.dirname(manifest)
+        ts_files = sorted(glob.glob(os.path.join(segment_dir, "*.ts")))
+        if not ts_files:
             return None
-        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-        return buf.tobytes()
+        latest_ts = ts_files[-1]
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            r = subprocess.run(
+                ["ffmpeg", "-y", "-i", latest_ts, "-frames:v", "1", "-q:v", "2", tmp_path],
+                capture_output=True, timeout=5,
+            )
+            if r.returncode != 0 or not os.path.exists(tmp_path):
+                return None
+            with open(tmp_path, "rb") as f:
+                return f.read()
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
     jpeg = await asyncio.get_event_loop().run_in_executor(None, _grab)
     if jpeg is None:

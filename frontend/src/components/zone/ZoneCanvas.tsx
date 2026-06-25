@@ -19,6 +19,7 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
   const [zoneName, setZoneName] = useState('')
   const [canvasSize, setCanvasSize] = useState({ w: 640, h: 360 })
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null)
+  const [snapshotLoading, setSnapshotLoading] = useState(false)
 
   // Observe container resize
   useEffect(() => {
@@ -30,16 +31,13 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
     return () => obs.disconnect()
   }, [])
 
-  // Load video snapshot as background
-  useEffect(() => {
+  const loadSnapshot = () => {
     const token = localStorage.getItem('token')
-    fetch(`/api/v1/stream/${sourceId}/snapshot`, {
+    setSnapshotLoading(true)
+    fetch(`/api/v1/stream/${sourceId}/snapshot?t=${Date.now()}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
-      .then((r) => {
-        if (!r.ok) return null
-        return r.blob()
-      })
+      .then((r) => (r.ok ? r.blob() : null))
       .then((blob) => {
         if (!blob) return
         const url = URL.createObjectURL(blob)
@@ -48,7 +46,10 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
         img.src = url
       })
       .catch(() => {})
-  }, [sourceId])
+      .finally(() => setSnapshotLoading(false))
+  }
+
+  useEffect(() => { loadSnapshot() }, [sourceId])
 
   useEffect(() => {
     redraw()
@@ -163,7 +164,10 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
     <div>
       <Space style={{ marginBottom: 8 }}>
         {!drawing ? (
-          <Button type="primary" onClick={() => setDrawing(true)}>绘制新区域</Button>
+          <>
+            <Button type="primary" onClick={() => setDrawing(true)}>绘制新区域</Button>
+            <Button onClick={loadSnapshot} loading={snapshotLoading}>刷新预览</Button>
+          </>
         ) : (
           <>
             <Input
