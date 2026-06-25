@@ -20,11 +20,22 @@ export default function HlsPlayer({ src, zones, showOverlay }: Props) {
     const video = videoRef.current
     if (!video) return
 
+    // React's muted prop doesn't reliably set the DOM attribute — set via ref
+    video.muted = true
+
     const token = localStorage.getItem('token')
+
+    const tryPlay = () => {
+      video.play().catch(() => {
+        // Autoplay blocked; user must click play manually
+      })
+    }
 
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
+        // Live stream: always load the latest segments
+        liveSyncDurationCount: 3,
         xhrSetup: (xhr) => {
           if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
         },
@@ -32,10 +43,21 @@ export default function HlsPlayer({ src, zones, showOverlay }: Props) {
       hlsRef.current = hls
       hls.loadSource(src)
       hls.attachMedia(video)
-      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}))
+      hls.on(Hls.Events.MANIFEST_PARSED, tryPlay)
+      hls.on(Hls.Events.ERROR, (_e, data) => {
+        if (data.fatal) {
+          // Fatal error: try to recover
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hls.startLoad()
+          } else {
+            hls.destroy()
+          }
+        }
+      })
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Safari native HLS
       video.src = src
-      video.play().catch(() => {})
+      tryPlay()
     }
 
     return () => {
@@ -71,8 +93,6 @@ export default function HlsPlayer({ src, zones, showOverlay }: Props) {
           ctx.strokeStyle = color
           ctx.lineWidth = 2
           ctx.stroke()
-
-          // Label
           if (polygon.length > 0) {
             ctx.fillStyle = color
             ctx.font = '14px sans-serif'
@@ -93,8 +113,8 @@ export default function HlsPlayer({ src, zones, showOverlay }: Props) {
       <video
         ref={videoRef}
         style={{ width: '100%', display: 'block' }}
-        muted
         playsInline
+        controls
       />
       <canvas
         ref={canvasRef}
