@@ -136,3 +136,14 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+ai-docs/
+
+# Project specific
+.env
+backend/hls_segments/
+backend/uploads/videos/
+backend/uploads/faces/
+backend/uploads/zones/
+frontend/node_modules/
+frontend/dist/
