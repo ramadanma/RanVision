@@ -1,5 +1,10 @@
 version: "3.9"
 
+# 端口说明（已根据服务器现有容器避开冲突）：
+#   MySQL  : 3307 → 3306（服务器 3306 已被 mysql-server 占用）
+#   Redis  : 6381 → 6379（服务器 6380 已被 redis-server 占用）
+#   Backend: 8000 → 8000（空闲）
+
 services:
   mysql:
     image: mysql:8.0
@@ -12,7 +17,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     ports:
-      - "3306:3306"
+      - "3307:3306"
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -26,7 +31,7 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "6381:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
@@ -44,6 +49,7 @@ services:
       redis:
         condition: service_healthy
     environment:
+      # 容器间通信使用服务名，不走宿主机端口
       DATABASE_URL: mysql+aiomysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       SECRET_KEY: ${SECRET_KEY}
