@@ -24,8 +24,7 @@ export default function HlsPlayer({ sourceId, zones, showOverlay }: Props) {
       if (!token || cancelled) return
 
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-      const host = window.location.hostname
-      const wsUrl = `${protocol}://${host}:8000/api/v1/stream/${sourceId}/ws?token=${token}`
+      const wsUrl = `${protocol}://${window.location.host}/api/v1/stream/${sourceId}/ws?token=${token}`
 
       ws = new WebSocket(wsUrl)
       ws.binaryType = 'blob'
