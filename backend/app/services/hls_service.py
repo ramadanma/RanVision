@@ -75,7 +75,12 @@ class HLSManager:
             except Exception:
                 pass
         self._log_files[source_id] = log_file
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=log_file)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=log_file,
+            start_new_session=True,  # isolate from uvicorn's SIGINT
+        )
         self._processes[source_id] = proc
         logger.info("ffmpeg started for source %d (pid=%d)", source_id, proc.pid)
 
