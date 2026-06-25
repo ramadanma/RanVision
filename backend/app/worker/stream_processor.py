@@ -68,6 +68,8 @@ class StreamProcessor(threading.Thread):
 
         try:
             self._zones = asyncio.run(_fetch())
+            total_rules = sum(len(z.rules) for z in self._zones)
+            logger.info("Source %d: loaded %d zone(s) with %d rule(s)", self.source_id, len(self._zones), total_rules)
         except Exception as e:
             logger.warning("Zone reload failed for source %d: %s", self.source_id, e)
 
@@ -230,6 +232,11 @@ class StreamProcessor(threading.Thread):
 
     def _on_trigger(self, event: dict) -> None:
         import json
+        logger.info(
+            "Rule triggered: source=%d rule=%d zone=%d track=%d snapshot=%s",
+            self.source_id, event["rule_id"], event["zone_id"],
+            event["track_id"], event.get("snapshot"),
+        )
 
         async def _handle():
             from app.models.trigger_record import TriggerRecord
@@ -239,6 +246,22 @@ class StreamProcessor(threading.Thread):
             from sqlalchemy.orm import selectinload
 
             async with _thread_db() as db:
+                # Always save a TriggerRecord — independent of report configs
+                record = TriggerRecord(
+                    source_id=self.source_id,
+                    rule_id=event["rule_id"],
+                    zone_id=event["zone_id"],
+                    person_name=event.get("person_name"),
+                    rule_snapshot_json=json.dumps(event.get("snapshot", {})),
+                    photos_sent=0,
+                    alert_delivered=False,
+                )
+                db.add(record)
+                await db.commit()
+                await db.refresh(record)
+                logger.info("TriggerRecord #%d saved for source %d", record.id, self.source_id)
+
+                # Alert delivery — only for matching enabled report configs
                 result = await db.execute(
                     select(ReportConfig)
                     .where(ReportConfig.source_id == self.source_id, ReportConfig.is_enabled == True)
@@ -278,19 +301,10 @@ class StreamProcessor(threading.Thread):
                         delivery_error = str(e)[:500]
                         logger.error("Alert send failed for source %d: %s", self.source_id, e)
 
-                    if config.save_records:
-                        record = TriggerRecord(
-                            source_id=self.source_id,
-                            rule_id=event["rule_id"],
-                            zone_id=event["zone_id"],
-                            person_name=person_name,
-                            rule_snapshot_json=json.dumps(event.get("snapshot", {})),
-                            photos_sent=len(photos),
-                            alert_delivered=delivered,
-                            delivery_error=delivery_error,
-                        )
-                        db.add(record)
-                        await db.commit()
+                    record.photos_sent = len(photos)
+                    record.alert_delivered = delivered
+                    record.delivery_error = delivery_error
+                    await db.commit()
 
         try:
             asyncio.run(_handle())

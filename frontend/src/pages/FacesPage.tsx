@@ -3,9 +3,28 @@ import {
   Button, Col, Form, Input, Modal, Popconfirm, Row, Spin, Table, Typography, Upload, message
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import client from '../api/client'
 import { deleteFace, listFaces, uploadFace } from '../api/faces'
 import type { Face } from '../api/types'
+
+function FacePhoto({ faceId }: { faceId: number }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const blobRef = useRef<string | null>(null)
+  useEffect(() => {
+    client.get(`/faces/${faceId}/photo`, { responseType: 'blob' })
+      .then((r) => {
+        const u = URL.createObjectURL(r.data)
+        blobRef.current = u
+        setUrl(u)
+      })
+      .catch(() => {})
+    return () => { if (blobRef.current) URL.revokeObjectURL(blobRef.current) }
+  }, [faceId])
+  return url
+    ? <img src={url} alt="" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 4 }} />
+    : <span style={{ color: '#999' }}>—</span>
+}
 
 const { Title } = Typography
 
@@ -47,6 +66,12 @@ export default function FacesPage() {
 
   const columns: ColumnsType<Face> = [
     { title: 'ID', dataIndex: 'id', width: 60 },
+    {
+      title: '照片',
+      dataIndex: 'id',
+      width: 72,
+      render: (id: number) => <FacePhoto faceId={id} />,
+    },
     { title: '人员姓名', dataIndex: 'person_name' },
     {
       title: '上传时间',
