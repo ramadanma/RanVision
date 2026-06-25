@@ -2,6 +2,7 @@
 import logging
 import threading
 import time
+from contextlib import asynccontextmanager
 
 import cv2
 
@@ -10,8 +11,22 @@ from app.worker.rule_engine import rule_engine
 
 logger = logging.getLogger(__name__)
 
-# How often (in seconds) the worker re-reads zone/rule config from DB
 CONFIG_RELOAD_INTERVAL = 5.0
+
+
+@asynccontextmanager
+async def _thread_db():
+    """Create a fresh DB session for background thread use (avoids event-loop conflicts)."""
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+    from app.config import settings
+
+    engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
+    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with Session() as session:
+            yield session
+    finally:
+        await engine.dispose()
 
 
 class StreamProcessor(threading.Thread):
@@ -26,15 +41,13 @@ class StreamProcessor(threading.Thread):
         self._stop_event.set()
 
     def _reload_zones(self) -> None:
-        """Reload zones and rules from DB synchronously."""
-        from app.database import AsyncSessionLocal
         from app.models.zone import Zone
         from sqlalchemy import select
         from sqlalchemy.orm import selectinload
         import asyncio
 
         async def _fetch():
-            async with AsyncSessionLocal() as db:
+            async with _thread_db() as db:
                 result = await db.execute(
                     select(Zone)
                     .where(Zone.source_id == self.source_id)
@@ -48,11 +61,9 @@ class StreamProcessor(threading.Thread):
             logger.warning("Zone reload failed for source %d: %s", self.source_id, e)
 
     def _get_video_url(self) -> str | None:
-        """Get the HLS manifest URL for this source."""
         from app.config import settings
         import os
         manifest = os.path.join(settings.HLS_SEGMENTS_DIR, str(self.source_id), "index.m3u8")
-        # Wait up to 15s for HLS to start
         for _ in range(30):
             if os.path.exists(manifest):
                 return manifest
@@ -83,7 +94,6 @@ class StreamProcessor(threading.Thread):
                     time.sleep(0.1)
                     continue
 
-                # Phase 2: replace stubs with real inference
                 detections = yolo_stub.infer(frame)
                 identities = insightface_stub.identify(frame, detections)
 
@@ -100,20 +110,17 @@ class StreamProcessor(threading.Thread):
             logger.info("StreamProcessor stopped for source %d", self.source_id)
 
     def _on_trigger(self, event: dict) -> None:
-        """Handle a rule trigger: save record and send alert."""
         import asyncio
         import json
 
         async def _handle():
-            from app.database import AsyncSessionLocal
             from app.models.trigger_record import TriggerRecord
             from app.models.report_config import ReportConfig
             from app.services.alert_service import _select_photos, send_alert
             from sqlalchemy import select
             from sqlalchemy.orm import selectinload
 
-            async with AsyncSessionLocal() as db:
-                # Load matching report configs
+            async with _thread_db() as db:
                 result = await db.execute(
                     select(ReportConfig)
                     .where(ReportConfig.source_id == self.source_id, ReportConfig.is_enabled == True)
@@ -126,7 +133,6 @@ class StreamProcessor(threading.Thread):
                     if event["rule_id"] not in rule_ids:
                         continue
 
-                    # Retrieve cached photos from Redis
                     photos = []
                     if config.photo_count > 0:
                         from app.services.redis_service import get_redis
@@ -138,17 +144,19 @@ class StreamProcessor(threading.Thread):
 
                     person_name = event.get("person_name") if config.include_person_name else None
                     subject = f"[RanVision] Rule triggered: rule #{event['rule_id']}"
-                    body = f"Source: {self.source_id}\nZone: {event['zone_id']}\n" \
-                           f"Rule: {event['rule_id']}\n" \
-                           + (f"Person: {person_name}\n" if person_name else "") \
-                           + f"Details: {json.dumps(event.get('snapshot', {}))}"
+                    body = (
+                        f"Source: {self.source_id}\nZone: {event['zone_id']}\n"
+                        f"Rule: {event['rule_id']}\n"
+                        + (f"Person: {person_name}\n" if person_name else "")
+                        + f"Details: {json.dumps(event.get('snapshot', {}))}"
+                    )
 
+                    delivered = False
                     delivery_error = None
                     try:
                         await send_alert(config.delivery_method, config.destination, subject, body, photos)
                         delivered = True
                     except Exception as e:
-                        delivered = False
                         delivery_error = str(e)[:500]
 
                     if config.save_records:

@@ -63,10 +63,12 @@ class HLSManager:
         source.hls_output_dir = output_dir
         cmd = self._build_ffmpeg_cmd(source, output_dir)
 
+        log_path = os.path.join(output_dir, "ffmpeg.log")
+        log_file = open(log_path, "w")
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=log_file,
         )
         self._processes[source_id] = proc
 

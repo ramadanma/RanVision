@@ -20,8 +20,15 @@ export default function HlsPlayer({ src, zones, showOverlay }: Props) {
     const video = videoRef.current
     if (!video) return
 
+    const token = localStorage.getItem('token')
+
     if (Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true })
+      const hls = new Hls({
+        enableWorker: true,
+        xhrSetup: (xhr) => {
+          if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+        },
+      })
       hlsRef.current = hls
       hls.loadSource(src)
       hls.attachMedia(video)
