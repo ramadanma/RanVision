@@ -30,7 +30,7 @@ def infer(frame: np.ndarray, device: int = 0) -> list[dict]:
     """
     try:
         model = _get_model(device)
-        results = model.track(frame, persist=True, verbose=False, half=True)
+        results = model.track(frame, persist=True, verbose=False)
         if not results:
             return []
         result = results[0]

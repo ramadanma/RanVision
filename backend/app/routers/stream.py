@@ -42,25 +42,25 @@ async def stream_ws(
     from app.dependencies import decode_token
     from app.database import AsyncSessionLocal
     from app.services.frame_buffer import frame_buffer
+    import logging
+    logger = logging.getLogger(__name__)
 
-    # Authenticate via query-param token
+    # Must accept() before any close() call
+    await websocket.accept()
+
     user_id = decode_token(token)
     if user_id is None:
-        await websocket.close(code=4001)
+        await websocket.close(code=4001, reason="Unauthorized")
         return
 
     async with AsyncSessionLocal() as db:
         try:
-            source = await source_service.get_source(db, source_id, user_id)
+            await source_service.get_source(db, source_id, user_id)
         except HTTPException:
-            await websocket.close(code=4003)
+            await websocket.close(code=4003, reason="Source not found")
             return
 
-    if not source.is_active:
-        await websocket.close(code=4004)
-        return
-
-    await websocket.accept()
+    logger.info("WebSocket client connected for source %d (user %d)", source_id, user_id)
     last_version = 0
     try:
         while True:
@@ -69,9 +69,11 @@ async def stream_ws(
                 await websocket.send_bytes(jpeg)
                 last_version = version
             else:
-                await asyncio.sleep(0.05)  # poll at 20fps max
+                await asyncio.sleep(0.05)  # poll at up to 20 fps
     except WebSocketDisconnect:
-        pass
+        logger.info("WebSocket client disconnected from source %d", source_id)
+    except Exception as e:
+        logger.warning("WebSocket error for source %d: %s", source_id, e)
 
 
 @router.get("/{source_id}/snapshot")

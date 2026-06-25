@@ -15,41 +15,63 @@ export default function HlsPlayer({ sourceId, zones, showOverlay }: Props) {
   const [status, setStatus] = useState<'connecting' | 'live' | 'error'>('connecting')
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (!token) return
+    let ws: WebSocket | null = null
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+    let cancelled = false
 
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    // In dev, Vite proxy only handles HTTP. WebSocket needs to go directly to the backend.
-    const host = window.location.hostname
-    const wsUrl = `${protocol}://${host}:8000/api/v1/stream/${sourceId}/ws?token=${token}`
+    const connect = () => {
+      const token = localStorage.getItem('token')
+      if (!token || cancelled) return
 
-    const ws = new WebSocket(wsUrl)
-    ws.binaryType = 'blob'
-    wsRef.current = ws
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      const host = window.location.hostname
+      const wsUrl = `${protocol}://${host}:8000/api/v1/stream/${sourceId}/ws?token=${token}`
 
-    ws.onopen = () => setStatus('live')
-    ws.onerror = () => setStatus('error')
-    ws.onclose = () => setStatus('error')
+      ws = new WebSocket(wsUrl)
+      ws.binaryType = 'blob'
+      wsRef.current = ws
+      setStatus('connecting')
 
-    ws.onmessage = (e: MessageEvent<Blob>) => {
-      const canvas = canvasRef.current
-      if (!canvas) return
-      const ctx = canvas.getContext('2d')!
-      const url = URL.createObjectURL(e.data)
-      const img = new Image()
-      img.onload = () => {
-        // Resize canvas to match first frame
-        if (canvas.width !== img.naturalWidth) canvas.width = img.naturalWidth
-        if (canvas.height !== img.naturalHeight) canvas.height = img.naturalHeight
-        ctx.drawImage(img, 0, 0)
-        drawZones(ctx, canvas.width, canvas.height)
-        URL.revokeObjectURL(url)
+      ws.onopen = () => setStatus('live')
+
+      ws.onmessage = (e: MessageEvent<Blob>) => {
+        const canvas = canvasRef.current
+        if (!canvas) return
+        const ctx = canvas.getContext('2d')!
+        const url = URL.createObjectURL(e.data)
+        const img = new Image()
+        img.onload = () => {
+          if (canvas.width !== img.naturalWidth) canvas.width = img.naturalWidth
+          if (canvas.height !== img.naturalHeight) canvas.height = img.naturalHeight
+          ctx.drawImage(img, 0, 0)
+          drawZones(ctx, canvas.width, canvas.height)
+          URL.revokeObjectURL(url)
+        }
+        img.src = url
       }
-      img.src = url
+
+      ws.onclose = (e) => {
+        if (cancelled) return
+        if (e.code === 4001 || e.code === 4003) {
+          setStatus('error')
+          return
+        }
+        // Source not yet streaming or network hiccup — retry in 3s
+        setStatus('connecting')
+        retryTimer = setTimeout(connect, 3000)
+      }
+
+      ws.onerror = () => {
+        // onerror is always followed by onclose, let onclose handle retry
+      }
     }
 
+    connect()
+
     return () => {
-      ws.close()
+      cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
+      ws?.close()
       wsRef.current = null
     }
   }, [sourceId])
