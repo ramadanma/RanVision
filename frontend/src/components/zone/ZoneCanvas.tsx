@@ -18,7 +18,9 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
   const [points, setPoints] = useState<[number, number][]>([])
   const [zoneName, setZoneName] = useState('')
   const [canvasSize, setCanvasSize] = useState({ w: 640, h: 360 })
+  const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null)
 
+  // Observe container resize
   useEffect(() => {
     const obs = new ResizeObserver((entries) => {
       const entry = entries[0]
@@ -28,15 +30,48 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
     return () => obs.disconnect()
   }, [])
 
+  // Load video snapshot as background
+  useEffect(() => {
+    const token = localStorage.getItem('token')
+    fetch(`/api/v1/stream/${sourceId}/snapshot`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((r) => {
+        if (!r.ok) return null
+        return r.blob()
+      })
+      .then((blob) => {
+        if (!blob) return
+        const url = URL.createObjectURL(blob)
+        const img = new Image()
+        img.onload = () => setBgImage(img)
+        img.src = url
+      })
+      .catch(() => {})
+  }, [sourceId])
+
   useEffect(() => {
     redraw()
-  }, [zones, points, canvasSize])
+  }, [zones, points, canvasSize, bgImage])
 
   const redraw = () => {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')!
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    // Background: video frame or dark placeholder
+    if (bgImage) {
+      ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height)
+    } else {
+      ctx.fillStyle = '#222'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.fillStyle = '#555'
+      ctx.font = '14px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('启动视频源后可预览画面', canvas.width / 2, canvas.height / 2)
+      ctx.textAlign = 'left'
+    }
 
     // Draw saved zones
     zones.forEach((zone, i) => {
@@ -143,7 +178,7 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
           </>
         )}
       </Space>
-      <div ref={containerRef} style={{ background: '#222', lineHeight: 0 }}>
+      <div ref={containerRef} style={{ lineHeight: 0 }}>
         <canvas
           ref={canvasRef}
           width={canvasSize.w}

@@ -1,8 +1,9 @@
+import asyncio
 import os
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from app.config import settings
 from app.database import get_db
@@ -46,6 +47,33 @@ async def get_segment(
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Segment not found")
     return FileResponse(path, media_type="video/mp2t")
+
+
+@router.get("/{source_id}/snapshot")
+async def get_snapshot(
+    source_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await source_service.get_source(db, source_id, current_user.id)
+    manifest = _segment_path(source_id, "index.m3u8")
+    if not os.path.exists(manifest):
+        raise HTTPException(status_code=404, detail="Stream not started")
+
+    def _grab():
+        import cv2
+        cap = cv2.VideoCapture(manifest)
+        ret, frame = cap.read()
+        cap.release()
+        if not ret:
+            return None
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return buf.tobytes()
+
+    jpeg = await asyncio.get_event_loop().run_in_executor(None, _grab)
+    if jpeg is None:
+        raise HTTPException(status_code=503, detail="No frame available yet")
+    return Response(content=jpeg, media_type="image/jpeg")
 
 
 @router.post("/upload-video")

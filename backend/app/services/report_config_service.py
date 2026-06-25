@@ -32,8 +32,7 @@ async def create_report_config(db: AsyncSession, data: dict) -> ReportConfig:
     config = ReportConfig(**data)
     db.add(config)
     await db.commit()
-    await db.refresh(config)
-    return config
+    return await get_report_config(db, config.id)
 
 
 async def update_report_config(db: AsyncSession, config: ReportConfig, data: dict) -> ReportConfig:
@@ -41,8 +40,7 @@ async def update_report_config(db: AsyncSession, config: ReportConfig, data: dic
         if v is not None:
             setattr(config, k, v)
     await db.commit()
-    await db.refresh(config)
-    return config
+    return await get_report_config(db, config.id)
 
 
 async def delete_report_config(db: AsyncSession, config: ReportConfig) -> None:
