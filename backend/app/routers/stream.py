@@ -32,23 +32,6 @@ async def get_manifest(
     return FileResponse(path, media_type="application/vnd.apple.mpegurl")
 
 
-@router.get("/{source_id}/{segment}")
-async def get_segment(
-    source_id: int,
-    segment: str,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    # Only allow .ts segment files
-    if not segment.endswith(".ts"):
-        raise HTTPException(status_code=400, detail="Invalid segment")
-    await source_service.get_source(db, source_id, current_user.id)
-    path = _segment_path(source_id, segment)
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Segment not found")
-    return FileResponse(path, media_type="video/mp2t")
-
-
 @router.get("/{source_id}/snapshot")
 async def get_snapshot(
     source_id: int,
@@ -74,6 +57,22 @@ async def get_snapshot(
     if jpeg is None:
         raise HTTPException(status_code=503, detail="No frame available yet")
     return Response(content=jpeg, media_type="image/jpeg")
+
+
+@router.get("/{source_id}/{segment}")
+async def get_segment(
+    source_id: int,
+    segment: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not segment.endswith(".ts"):
+        raise HTTPException(status_code=400, detail="Invalid segment")
+    await source_service.get_source(db, source_id, current_user.id)
+    path = _segment_path(source_id, segment)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Segment not found")
+    return FileResponse(path, media_type="video/mp2t")
 
 
 @router.post("/upload-video")
