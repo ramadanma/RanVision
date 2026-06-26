@@ -43,12 +43,26 @@ class StreamProcessor(threading.Thread):
         self._known_faces: list[tuple[str, np.ndarray]] = []
         self._last_reload = 0.0
         self._last_face_reload = 0.0
+        self._loop: asyncio.AbstractEventLoop | None = None
 
         from app.config import settings
         self._device = source_id % max(settings.GPU_COUNT, 1)
 
     def stop(self) -> None:
         self._stop_event.set()
+
+    def _run_async(self, coro):
+        """Run a coroutine on this thread's persistent event loop.
+
+        Using a single loop per thread (instead of asyncio.run which creates
+        and *closes* a new loop each call) prevents 'Event loop is closed'
+        errors from SQLAlchemy / Redis connection-pool cleanup tasks that are
+        still alive between calls.
+        """
+        if self._loop is None or self._loop.is_closed():
+            self._loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._loop)
+        return self._loop.run_until_complete(coro)
 
     # ── Zone reload ──────────────────────────────────────────────────────────
 
@@ -67,7 +81,7 @@ class StreamProcessor(threading.Thread):
                 return list(result.scalars().all())
 
         try:
-            self._zones = asyncio.run(_fetch())
+            self._zones = self._run_async(_fetch())
             total_rules = sum(len(z.rules) for z in self._zones)
             logger.info("Source %d: loaded %d zone(s) with %d rule(s)", self.source_id, len(self._zones), total_rules)
         except Exception as e:
@@ -100,7 +114,7 @@ class StreamProcessor(threading.Thread):
                 from app.services.source_service import build_rtsp_url
                 return build_rtsp_url(source)
         try:
-            return asyncio.run(_fetch())
+            return self._run_async(_fetch())
         except Exception as e:
             logger.error("Failed to get capture URL for source %d: %s", self.source_id, e)
             return None
@@ -187,6 +201,8 @@ class StreamProcessor(threading.Thread):
         finally:
             cap.release()
             frame_buffer.clear(self.source_id)
+            if self._loop and not self._loop.is_closed():
+                self._loop.close()
             logger.info("StreamProcessor stopped for source %d", self.source_id)
 
     # ── Photo caching ─────────────────────────────────────────────────────────
@@ -228,7 +244,7 @@ class StreamProcessor(threading.Thread):
                 await redis.expire(key, PHOTO_TTL)
 
         try:
-            asyncio.run(_push())
+            self._run_async(_push())
         except Exception as e:
             logger.debug("Photo cache error: %s", e)
 
@@ -321,6 +337,6 @@ class StreamProcessor(threading.Thread):
                     )
 
         try:
-            asyncio.run(_handle())
+            self._run_async(_handle())
         except Exception as e:
             logger.error("Trigger handler error for source %d: %s", self.source_id, e)
