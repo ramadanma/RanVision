@@ -18,13 +18,6 @@ class Settings(BaseSettings):
     GPU_COUNT: int = 4                          # number of CUDA devices on server
     FACE_SIM_THRESHOLD: float = 0.5            # cosine similarity threshold
 
-    # Phase 2: SMTP alert
-    SMTP_HOST: str = ""
-    SMTP_PORT: int = 587
-    SMTP_USER: str = ""
-    SMTP_PASSWORD: str = ""
-    SMTP_FROM: str = ""
-
     @property
     def uploads_videos(self) -> str:
         return f"{self.UPLOADS_DIR}/videos"

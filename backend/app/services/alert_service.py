@@ -9,8 +9,6 @@ from email.mime.text import MIMEText
 
 import httpx
 
-from app.config import settings
-
 logger = logging.getLogger(__name__)
 
 
@@ -57,15 +55,15 @@ async def send_alert(
 
 
 async def _send_email(to: str, subject: str, body: str, photos: list[bytes], smtp_cfg: dict) -> None:
-    host = smtp_cfg.get("host") or settings.SMTP_HOST
+    host = smtp_cfg.get("host", "")
     if not host:
         logger.warning("SMTP host not configured, skipping email")
         return
 
-    port = smtp_cfg.get("port") or settings.SMTP_PORT
-    username = smtp_cfg.get("username") or settings.SMTP_USER
-    password = smtp_cfg.get("password") or settings.SMTP_PASSWORD
-    from_addr = smtp_cfg.get("from_addr") or settings.SMTP_FROM or username
+    port = smtp_cfg.get("port", 587)
+    username = smtp_cfg.get("username", "")
+    password = smtp_cfg.get("password", "")
+    from_addr = smtp_cfg.get("from_addr") or username
     use_tls = smtp_cfg.get("use_tls", True)
 
     msg = MIMEMultipart()
