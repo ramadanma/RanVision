@@ -231,8 +231,8 @@ class StreamProcessor(threading.Thread):
 
     # ── Main loop ─────────────────────────────────────────────────────────────
 
-    # Push every Nth frame to keep WebSocket ~10 fps regardless of source fps
-    _PUSH_EVERY_N = 3
+    # Push every Nth frame to keep WebSocket ~15 fps regardless of source fps
+    _PUSH_EVERY_N = 2
 
     def run(self) -> None:
         logger.info("StreamProcessor started for source %d (device=cuda:%d)", self.source_id, self._device)
@@ -251,6 +251,7 @@ class StreamProcessor(threading.Thread):
         from app.services.frame_buffer import frame_buffer
         frame_count = 0
         fail_count = 0
+        prev_detections: list = []  # previous frame's detections for skeleton overlay
 
         try:
             while not self._stop_event.is_set():
@@ -278,6 +279,7 @@ class StreamProcessor(threading.Thread):
                         # Clear stale photo keys so recycled track IDs don't get old frames
                         self._delete_photo_keys(self._active_track_ids)
                         self._active_track_ids.clear()
+                        prev_detections = []
                         fail_count = 0
                     else:
                         time.sleep(0.1)
@@ -285,20 +287,23 @@ class StreamProcessor(threading.Thread):
                 fail_count = 0
                 frame_count += 1
 
-                detections = yolo_stub.infer(frame, device=self._device)
-                detections = self._filter_by_roi(detections, frame.shape)
-
-                # Push every Nth frame to WebSocket buffer (with optional skeleton overlay)
+                # Push frame BEFORE YOLO inference so display latency is never
+                # gated by YOLO speed. Skeleton uses prev frame's detections
+                # (≤1 frame lag, imperceptible at normal playback speed).
                 if frame_count % self._PUSH_EVERY_N == 0:
-                    if self._show_skeleton and detections:
+                    if self._show_skeleton and prev_detections:
                         display = frame.copy()
-                        self._draw_skeleton(display, detections)
+                        self._draw_skeleton(display, prev_detections)
                     else:
                         display = frame
                     _, jpeg_buf = cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 70])
                     frame_buffer.push(self.source_id, jpeg_buf.tobytes())
                     if frame_count == self._PUSH_EVERY_N:
                         logger.info("First frame pushed to buffer for source %d", self.source_id)
+
+                detections = yolo_stub.infer(frame, device=self._device)
+                detections = self._filter_by_roi(detections, frame.shape)
+                prev_detections = detections
 
                 if self._face_recognition_enabled and self._known_faces:
                     identities = insightface_stub.identify(

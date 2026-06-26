@@ -33,20 +33,24 @@ export default function HlsPlayer({ sourceId, zones, showOverlay }: Props) {
 
       ws.onopen = () => setStatus('live')
 
+      let decoding = false
       ws.onmessage = (e: MessageEvent<Blob>) => {
+        // Drop frame if still decoding the previous one — keeps display at latest frame
+        if (decoding) return
         const canvas = canvasRef.current
         if (!canvas) return
         const ctx = canvas.getContext('2d')!
-        const url = URL.createObjectURL(e.data)
-        const img = new Image()
-        img.onload = () => {
-          if (canvas.width !== img.naturalWidth) canvas.width = img.naturalWidth
-          if (canvas.height !== img.naturalHeight) canvas.height = img.naturalHeight
-          ctx.drawImage(img, 0, 0)
-          drawZones(ctx, canvas.width, canvas.height)
-          URL.revokeObjectURL(url)
-        }
-        img.src = url
+        decoding = true
+        createImageBitmap(e.data)
+          .then((bitmap) => {
+            if (canvas.width !== bitmap.width) canvas.width = bitmap.width
+            if (canvas.height !== bitmap.height) canvas.height = bitmap.height
+            ctx.drawImage(bitmap, 0, 0)
+            bitmap.close()
+            drawZones(ctx, canvas.width, canvas.height)
+          })
+          .catch(() => {})
+          .finally(() => { decoding = false })
       }
 
       ws.onclose = (e) => {
