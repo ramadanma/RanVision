@@ -91,37 +91,10 @@ async def get_snapshot(
     db: AsyncSession = Depends(get_db),
 ):
     await source_service.get_source(db, source_id, current_user.id)
-    manifest = _segment_path(source_id, "index.m3u8")
-    if not os.path.exists(manifest):
-        raise HTTPException(status_code=404, detail="Stream not started")
-
-    def _grab():
-        import glob, subprocess, tempfile
-        segment_dir = os.path.dirname(manifest)
-        ts_files = sorted(glob.glob(os.path.join(segment_dir, "*.ts")))
-        if not ts_files:
-            return None
-        latest_ts = ts_files[-1]
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-            tmp_path = tmp.name
-        try:
-            r = subprocess.run(
-                ["ffmpeg", "-y", "-i", latest_ts, "-frames:v", "1", "-q:v", "2", tmp_path],
-                capture_output=True, timeout=5,
-            )
-            if r.returncode != 0 or not os.path.exists(tmp_path):
-                return None
-            with open(tmp_path, "rb") as f:
-                return f.read()
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-
-    jpeg = await asyncio.get_event_loop().run_in_executor(None, _grab)
-    if jpeg is None:
-        raise HTTPException(status_code=503, detail="No frame available yet")
+    from app.services.frame_buffer import frame_buffer
+    _, jpeg = frame_buffer.get(source_id)
+    if not jpeg:
+        raise HTTPException(status_code=503, detail="No frame available — start the stream first")
     return Response(content=jpeg, media_type="image/jpeg")
 
 

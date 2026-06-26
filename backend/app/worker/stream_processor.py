@@ -44,6 +44,7 @@ class StreamProcessor(threading.Thread):
         self._last_reload = 0.0
         self._last_face_reload = 0.0
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._active_track_ids: set[int] = set()
 
         from app.config import settings
         self._device = source_id % max(settings.GPU_COUNT, 1)
@@ -58,10 +59,13 @@ class StreamProcessor(threading.Thread):
         and *closes* a new loop each call) prevents 'Event loop is closed'
         errors from SQLAlchemy / Redis connection-pool cleanup tasks that are
         still alive between calls.
+
+        Always calls set_event_loop to restore the thread's current loop in
+        case any third-party code (e.g. asyncio.run) reset it to None.
         """
         if self._loop is None or self._loop.is_closed():
             self._loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._loop)
+        asyncio.set_event_loop(self._loop)
         return self._loop.run_until_complete(coro)
 
     # ── Zone reload ──────────────────────────────────────────────────────────
@@ -90,12 +94,31 @@ class StreamProcessor(threading.Thread):
     # ── Face embedding reload ─────────────────────────────────────────────────
 
     def _reload_faces(self) -> None:
+        """Load face embeddings via the thread's own event loop (avoids asyncio.run interference)."""
+        async def _fetch():
+            from sqlalchemy import select
+            from app.models.face import Face
+            async with _thread_db() as db:
+                result = await db.execute(
+                    select(Face).where(
+                        Face.user_id == self.user_id,
+                        Face.embedding_path.isnot(None),
+                    )
+                )
+                pairs = []
+                for face in result.scalars().all():
+                    try:
+                        emb = np.load(face.embedding_path)
+                        pairs.append((face.person_name, emb))
+                    except Exception as load_err:
+                        logger.warning("Failed to load embedding for face %s: %s", face.person_name, load_err)
+                return pairs
+
         try:
-            from app.services.face_service import load_embeddings_for_user
-            self._known_faces = load_embeddings_for_user(self.user_id)
-            logger.debug("Loaded %d face embeddings for user %d", len(self._known_faces), self.user_id)
+            self._known_faces = self._run_async(_fetch())
+            logger.info("Loaded %d face embedding(s) for user %d", len(self._known_faces), self.user_id)
         except Exception as e:
-            logger.warning("Face reload failed: %s", e)
+            logger.warning("Face reload failed for user %d: %s", self.user_id, e)
 
     # ── Direct source URL ────────────────────────────────────────────────────
 
@@ -164,6 +187,9 @@ class StreamProcessor(threading.Thread):
                         time.sleep(1)
                         cap = cv2.VideoCapture(url)
                         yolo_stub.reset_tracker(self._device)
+                        # Clear stale photo keys so recycled track IDs don't get old frames
+                        self._delete_photo_keys(self._active_track_ids)
+                        self._active_track_ids.clear()
                         fail_count = 0
                     else:
                         time.sleep(0.1)
@@ -180,6 +206,13 @@ class StreamProcessor(threading.Thread):
 
                 detections = yolo_stub.infer(frame, device=self._device)
                 identities = insightface_stub.identify(frame, detections, self._known_faces)
+
+                # Clean up Redis photo keys for tracks that have disappeared
+                current_ids = {d["track_id"] for d in detections}
+                gone_ids = self._active_track_ids - current_ids
+                if gone_ids:
+                    self._delete_photo_keys(gone_ids)
+                self._active_track_ids = current_ids
 
                 if frame_count % 150 == 0:
                     logger.info(
@@ -204,6 +237,24 @@ class StreamProcessor(threading.Thread):
             if self._loop and not self._loop.is_closed():
                 self._loop.close()
             logger.info("StreamProcessor stopped for source %d", self.source_id)
+
+    # ── Photo key cleanup ────────────────────────────────────────────────────
+
+    def _delete_photo_keys(self, track_ids: set[int]) -> None:
+        """Delete Redis photo keys for tracks that have left the scene."""
+        if not track_ids:
+            return
+
+        async def _del():
+            from app.services.redis_service import get_redis
+            redis = await get_redis()
+            keys = [f"photo:{self.source_id}:{tid}" for tid in track_ids]
+            await redis.delete(*keys)
+
+        try:
+            self._run_async(_del())
+        except Exception as e:
+            logger.debug("Photo key cleanup error: %s", e)
 
     # ── Photo caching ─────────────────────────────────────────────────────────
 
