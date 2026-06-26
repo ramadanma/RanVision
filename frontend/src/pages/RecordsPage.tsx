@@ -1,5 +1,5 @@
 import { DeleteOutlined } from '@ant-design/icons'
-import { Button, Col, Popconfirm, Row, Select, Table, Tag, Typography, message } from 'antd'
+import { Button, Col, Popconfirm, Row, Select, Table, Tag, Tooltip, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useEffect, useState } from 'react'
 import { deleteRecord, listRecords } from '../api/records'
@@ -51,9 +51,18 @@ export default function RecordsPage() {
     { title: '照片', dataIndex: 'photos_sent', width: 80 },
     {
       title: '报告',
-      dataIndex: 'alert_delivered',
-      width: 80,
-      render: (v: boolean) => <Tag color={v ? 'green' : 'red'}>{v ? '已发送' : '失败'}</Tag>,
+      width: 120,
+      render: (_: unknown, row: TriggerRecord) => {
+        if (row.alert_delivered) return <Tag color="green">已发送</Tag>
+        if (row.delivery_error) {
+          return (
+            <Tooltip title={row.delivery_error}>
+              <Tag color="red" style={{ cursor: 'help' }}>失败（悬停查看）</Tag>
+            </Tooltip>
+          )
+        }
+        return <Tag color="default">未发送</Tag>
+      },
     },
     {
       title: '操作',

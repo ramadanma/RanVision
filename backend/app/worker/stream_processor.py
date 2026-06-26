@@ -273,44 +273,52 @@ class StreamProcessor(threading.Thread):
                     .options(selectinload(ReportConfig.trigger_rules))
                 )
                 configs = list(result.scalars().all())
-                smtp_cfg = await get_smtp_config_dict(db)
 
+                matched_any = False
                 for config in configs:
                     rule_ids = [r.id for r in config.trigger_rules]
                     if event["rule_id"] not in rule_ids:
                         continue
+                    matched_any = True
 
                     photos: list[bytes] = []
-                    if config.photo_count > 0:
-                        from app.services.redis_service import get_redis
-                        redis = await get_redis()
-                        key = f"photo:{self.source_id}:{event['track_id']}"
-                        raw_frames = await redis.lrange(key, 0, -1)
-                        photos = _select_photos(raw_frames, config.photo_count)
-                        await redis.delete(key)
-
-                    person_name = event.get("person_name") if config.include_person_name else None
-                    subject = f"[RanVision] 规则触发: #{event['rule_id']}"
-                    body = (
-                        f"Source: {self.source_id}\nZone: {event['zone_id']}\n"
-                        f"Rule: {event['rule_id']}\n"
-                        + (f"Person: {person_name}\n" if person_name else "")
-                        + f"Details: {json.dumps(event.get('snapshot', {}), ensure_ascii=False)}"
-                    )
-
                     delivered = False
                     delivery_error = None
                     try:
+                        if config.photo_count > 0:
+                            from app.services.redis_service import get_redis
+                            redis = await get_redis()
+                            key = f"photo:{self.source_id}:{event['track_id']}"
+                            raw_frames = await redis.lrange(key, 0, -1)
+                            photos = _select_photos(raw_frames, config.photo_count)
+                            await redis.delete(key)
+
+                        person_name = event.get("person_name") if config.include_person_name else None
+                        subject = f"[RanVision] 规则触发: #{event['rule_id']}"
+                        body = (
+                            f"Source: {self.source_id}\nZone: {event['zone_id']}\n"
+                            f"Rule: {event['rule_id']}\n"
+                            + (f"Person: {person_name}\n" if person_name else "")
+                            + f"Details: {json.dumps(event.get('snapshot', {}), ensure_ascii=False)}"
+                        )
+
+                        smtp_cfg = await get_smtp_config_dict(db) if config.delivery_method == "email" else {}
                         await send_alert(config.delivery_method, config.destination, subject, body, photos, smtp_cfg=smtp_cfg)
                         delivered = True
                     except Exception as e:
                         delivery_error = str(e)[:500]
-                        logger.error("Alert send failed for source %d: %s", self.source_id, e)
+                        logger.error("Alert send failed for config %d source %d: %s", config.id, self.source_id, e)
 
                     record.photos_sent = len(photos)
                     record.alert_delivered = delivered
                     record.delivery_error = delivery_error
                     await db.commit()
+
+                if not matched_any:
+                    logger.info(
+                        "Rule %d fired for source %d but no report config has this rule linked",
+                        event["rule_id"], self.source_id,
+                    )
 
         try:
             asyncio.run(_handle())
