@@ -242,6 +242,7 @@ class StreamProcessor(threading.Thread):
             from app.models.trigger_record import TriggerRecord
             from app.models.report_config import ReportConfig
             from app.services.alert_service import _select_photos, send_alert
+            from app.services.smtp_config_service import get_smtp_config_dict
             from sqlalchemy import select
             from sqlalchemy.orm import selectinload
 
@@ -268,6 +269,7 @@ class StreamProcessor(threading.Thread):
                     .options(selectinload(ReportConfig.trigger_rules))
                 )
                 configs = list(result.scalars().all())
+                smtp_cfg = await get_smtp_config_dict(db)
 
                 for config in configs:
                     rule_ids = [r.id for r in config.trigger_rules]
@@ -295,7 +297,7 @@ class StreamProcessor(threading.Thread):
                     delivered = False
                     delivery_error = None
                     try:
-                        await send_alert(config.delivery_method, config.destination, subject, body, photos)
+                        await send_alert(config.delivery_method, config.destination, subject, body, photos, smtp_cfg=smtp_cfg)
                         delivered = True
                     except Exception as e:
                         delivery_error = str(e)[:500]

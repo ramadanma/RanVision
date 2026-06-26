@@ -4,6 +4,7 @@ import AppLayout from './components/layout/AppLayout'
 import FacesPage from './pages/FacesPage'
 import LoginPage from './pages/LoginPage'
 import RecordsPage from './pages/RecordsPage'
+import SettingsPage from './pages/SettingsPage'
 import SourceDetailPage from './pages/SourceDetailPage'
 import SourceListPage from './pages/SourceListPage'
 
@@ -24,6 +25,7 @@ export default function AppRoutes() {
         <Route path="sources/:id" element={<SourceDetailPage />} />
         <Route path="faces" element={<FacesPage />} />
         <Route path="records" element={<RecordsPage />} />
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
     </Routes>
   )

@@ -2,6 +2,7 @@ import {
   AlertOutlined,
   CameraOutlined,
   LogoutOutlined,
+  SettingOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import { Menu, Typography } from 'antd'
@@ -14,6 +15,7 @@ const items = [
   { key: '/sources', icon: <CameraOutlined />, label: '视频源' },
   { key: '/faces', icon: <UserOutlined />, label: '人脸库' },
   { key: '/records', icon: <AlertOutlined />, label: '触发记录' },
+  { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ]
 
 export default function Sidebar() {

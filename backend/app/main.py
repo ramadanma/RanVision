@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import auth, faces, records, report_configs, rules, sources, stream, zones
+from app.routers import auth, faces, records, report_configs, rules, smtp_config, sources, stream, zones
 from app.services.hls_service import hls_manager
 from app.services.redis_service import close_redis
 from app.worker.worker_manager import worker_manager
@@ -60,6 +60,7 @@ app.include_router(rules.router, prefix=PREFIX)
 app.include_router(faces.router, prefix=PREFIX)
 app.include_router(report_configs.router, prefix=PREFIX)
 app.include_router(records.router, prefix=PREFIX)
+app.include_router(smtp_config.router, prefix=PREFIX)
 
 
 @app.get("/health")

@@ -48,21 +48,29 @@ async def send_alert(
     subject: str,
     body_text: str,
     photos: list[bytes],
+    smtp_cfg: dict | None = None,
 ) -> None:
     if delivery_method == "email":
-        await _send_email(destination, subject, body_text, photos)
+        await _send_email(destination, subject, body_text, photos, smtp_cfg or {})
     elif delivery_method == "webhook":
         await _send_webhook(destination, subject, body_text, photos)
 
 
-async def _send_email(to: str, subject: str, body: str, photos: list[bytes]) -> None:
-    if not settings.SMTP_HOST:
-        logger.warning("SMTP_HOST not configured, skipping email")
+async def _send_email(to: str, subject: str, body: str, photos: list[bytes], smtp_cfg: dict) -> None:
+    host = smtp_cfg.get("host") or settings.SMTP_HOST
+    if not host:
+        logger.warning("SMTP host not configured, skipping email")
         return
+
+    port = smtp_cfg.get("port") or settings.SMTP_PORT
+    username = smtp_cfg.get("username") or settings.SMTP_USER
+    password = smtp_cfg.get("password") or settings.SMTP_PASSWORD
+    from_addr = smtp_cfg.get("from_addr") or settings.SMTP_FROM or username
+    use_tls = smtp_cfg.get("use_tls", True)
 
     msg = MIMEMultipart()
     msg["Subject"] = subject
-    msg["From"] = settings.SMTP_FROM or settings.SMTP_USER
+    msg["From"] = from_addr
     msg["To"] = to
     msg.attach(MIMEText(body, "plain", "utf-8"))
     for i, photo_bytes in enumerate(photos):
@@ -72,11 +80,12 @@ async def _send_email(to: str, subject: str, body: str, photos: list[bytes]) -> 
     last_err = None
     for attempt in range(3):
         try:
-            with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as smtp:
-                smtp.starttls()
-                if settings.SMTP_USER:
-                    smtp.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-                smtp.sendmail(msg["From"], [to], msg.as_string())
+            with smtplib.SMTP(host, port, timeout=15) as smtp:
+                if use_tls:
+                    smtp.starttls()
+                if username:
+                    smtp.login(username, password)
+                smtp.sendmail(from_addr, [to], msg.as_string())
             return
         except Exception as e:
             last_err = e
