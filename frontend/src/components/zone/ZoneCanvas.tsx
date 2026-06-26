@@ -21,11 +21,13 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null)
   const [snapshotLoading, setSnapshotLoading] = useState(false)
 
-  // Observe container resize
+  // Observe container resize — derive height from width (16:9) so that when the
+  // tab is hidden (display:none → width=0) the canvas size doesn't collapse to 0,
+  // which would make it invisible when the tab is shown again.
   useEffect(() => {
     const obs = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      setCanvasSize({ w: entry.contentRect.width, h: entry.contentRect.height })
+      const w = entries[0].contentRect.width
+      if (w > 0) setCanvasSize({ w, h: Math.round(w * 9 / 16) })
     })
     if (containerRef.current) obs.observe(containerRef.current)
     return () => obs.disconnect()
@@ -182,7 +184,7 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
           </>
         )}
       </Space>
-      <div ref={containerRef} style={{ lineHeight: 0 }}>
+      <div ref={containerRef} style={{ lineHeight: 0, width: '100%', minHeight: 360 }}>
         <canvas
           ref={canvasRef}
           width={canvasSize.w}
