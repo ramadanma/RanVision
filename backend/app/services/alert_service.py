@@ -78,12 +78,20 @@ async def _send_email(to: str, subject: str, body: str, photos: list[bytes], smt
     last_err = None
     for attempt in range(3):
         try:
-            with smtplib.SMTP(host, port, timeout=15) as smtp:
-                if use_tls:
-                    smtp.starttls()
-                if username:
-                    smtp.login(username, password)
-                smtp.sendmail(from_addr, [to], msg.as_string())
+            if port == 465:
+                # Port 465: direct SSL (SMTP_SSL), no STARTTLS
+                with smtplib.SMTP_SSL(host, port, timeout=15) as smtp:
+                    if username:
+                        smtp.login(username, password)
+                    smtp.sendmail(from_addr, [to], msg.as_string())
+            else:
+                # Port 587/25/etc: plain SMTP, optional STARTTLS
+                with smtplib.SMTP(host, port, timeout=15) as smtp:
+                    if use_tls:
+                        smtp.starttls()
+                    if username:
+                        smtp.login(username, password)
+                    smtp.sendmail(from_addr, [to], msg.as_string())
             return
         except Exception as e:
             last_err = e
