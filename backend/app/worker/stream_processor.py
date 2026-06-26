@@ -149,6 +149,7 @@ class StreamProcessor(threading.Thread):
                         cap.release()
                         time.sleep(1)
                         cap = cv2.VideoCapture(url)
+                        yolo_stub.reset_tracker(self._device)
                         fail_count = 0
                     else:
                         time.sleep(0.1)
@@ -163,11 +164,14 @@ class StreamProcessor(threading.Thread):
                     if frame_count == self._PUSH_EVERY_N:
                         logger.info("First frame pushed to buffer for source %d", self.source_id)
 
-                if frame_count % 150 == 0:
-                    logger.info("StreamProcessor source %d alive: %d frames processed", self.source_id, frame_count)
-
                 detections = yolo_stub.infer(frame, device=self._device)
                 identities = insightface_stub.identify(frame, detections, self._known_faces)
+
+                if frame_count % 150 == 0:
+                    logger.info(
+                        "StreamProcessor source %d alive: %d frames processed, %d person(s) detected",
+                        self.source_id, frame_count, len(detections),
+                    )
 
                 # Push frame to Redis for each tracked person in any zone
                 self._cache_photos(frame, detections)

@@ -22,6 +22,20 @@ def _get_model(device: int):
         return _models[device]
 
 
+def reset_tracker(device: int = 0) -> None:
+    """Reset the tracker state after a stream reconnect."""
+    with _lock:
+        model = _models.get(device)
+        if model is None:
+            return
+        try:
+            if hasattr(model, "predictor") and model.predictor is not None:
+                if hasattr(model.predictor, "trackers"):
+                    model.predictor.trackers = [None] * len(model.predictor.trackers)
+        except Exception as e:
+            logger.debug("Tracker reset warning (device=%d): %s", device, e)
+
+
 def infer(frame: np.ndarray, device: int = 0) -> list[dict]:
     """
     Run YOLO pose inference on a single frame.
@@ -38,14 +52,19 @@ def infer(frame: np.ndarray, device: int = 0) -> list[dict]:
             return []
 
         detections = []
+        no_id_count = 0
         for i in range(len(result.boxes)):
             box = result.boxes[i]
             if box.id is None:
+                no_id_count += 1
                 continue
             track_id = int(box.id.item())
             bbox = box.xyxy[0].tolist()
             kps = result.keypoints[i].data[0].tolist()  # [[x, y, conf] * 17]
             detections.append({"track_id": track_id, "bbox": bbox, "keypoints": kps})
+
+        if no_id_count > 0 and not detections:
+            logger.debug("YOLO: %d box(es) detected but all have no track ID yet (tracker warming up)", no_id_count)
         return detections
     except Exception as e:
         logger.error("YOLO infer error (device=%d): %s", device, e)

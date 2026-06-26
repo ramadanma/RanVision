@@ -1,10 +1,13 @@
 """Rule evaluation engine — called per frame with detections."""
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 TRIGGER_COOLDOWN = 60.0  # seconds between repeated triggers for same track+rule
 
@@ -57,9 +60,13 @@ class RuleEngine:
 
                 in_zone = self._person_in_zone(detection, polygon, frame)
 
-                if in_zone and zone.id not in state.zone_entry_time:
+                just_entered = in_zone and zone.id not in state.zone_entry_time
+                if just_entered:
                     state.zone_entry_time[zone.id] = time.time()
+                    logger.info("Track %d entered zone %d (source %d)", track_id, zone.id, source_id)
                 elif not in_zone:
+                    if zone.id in state.zone_entry_time:
+                        logger.info("Track %d left zone %d (source %d)", track_id, zone.id, source_id)
                     state.zone_entry_time.pop(zone.id, None)
                 state.in_zone[zone.id] = in_zone
 
@@ -72,7 +79,12 @@ class RuleEngine:
                     # Cooldown check
                     cooldown_key = (rule.id, zone.id)
                     last = state.last_trigger.get(cooldown_key, 0)
-                    if time.time() - last < TRIGGER_COOLDOWN:
+                    remaining = TRIGGER_COOLDOWN - (time.time() - last)
+                    if remaining > 0:
+                        logger.debug(
+                            "Rule %d cooldown active for track %d: %.0fs remaining",
+                            rule.id, track_id, remaining,
+                        )
                         continue
 
                     event = self._eval_rule(rule, detection, state, zone.id, identities.get(track_id))
@@ -132,6 +144,10 @@ class RuleEngine:
         threshold = rule.dwell_seconds or 0
         op = rule.dwell_op or "gt"
         if not ((op == "gt" and elapsed > threshold) or (op == "lt" and elapsed < threshold)):
+            logger.debug(
+                "Dwell rule %d not met: elapsed=%.1fs threshold=%.1fs op=%s track=%d zone=%d",
+                rule.id, elapsed, threshold, op, detection["track_id"], zone_id,
+            )
             return None
         return {
             "rule_id": rule.id,
