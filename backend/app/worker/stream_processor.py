@@ -45,6 +45,8 @@ class StreamProcessor(threading.Thread):
         self._last_face_reload = 0.0
         self._loop: asyncio.AbstractEventLoop | None = None
         self._active_track_ids: set[int] = set()
+        self._face_recognition_enabled: bool = True
+        self._face_check_front: bool = False
 
         from app.config import settings
         self._device = source_id % max(settings.GPU_COUNT, 1)
@@ -90,6 +92,26 @@ class StreamProcessor(threading.Thread):
             logger.info("Source %d: loaded %d zone(s) with %d rule(s)", self.source_id, len(self._zones), total_rules)
         except Exception as e:
             logger.warning("Zone reload failed for source %d: %s", self.source_id, e)
+
+    # ── Source flags reload ──────────────────────────────────────────────────
+
+    def _reload_source_flags(self) -> None:
+        async def _fetch():
+            from sqlalchemy import select
+            from app.models.source import Source
+            async with _thread_db() as db:
+                result = await db.execute(select(Source).where(Source.id == self.source_id))
+                source = result.scalar_one_or_none()
+                if source:
+                    return source.face_recognition_enabled, source.face_check_front
+                return True, False
+
+        try:
+            enabled, check_front = self._run_async(_fetch())
+            self._face_recognition_enabled = enabled
+            self._face_check_front = check_front
+        except Exception as e:
+            logger.warning("Source flags reload failed for source %d: %s", self.source_id, e)
 
     # ── Face embedding reload ─────────────────────────────────────────────────
 
@@ -171,6 +193,7 @@ class StreamProcessor(threading.Thread):
 
                 if now - self._last_reload > CONFIG_RELOAD_INTERVAL:
                     self._reload_zones()
+                    self._reload_source_flags()
                     self._last_reload = now
 
                 if now - self._last_face_reload > FACE_RELOAD_INTERVAL:
@@ -205,7 +228,13 @@ class StreamProcessor(threading.Thread):
                         logger.info("First frame pushed to buffer for source %d", self.source_id)
 
                 detections = yolo_stub.infer(frame, device=self._device)
-                identities = insightface_stub.identify(frame, detections, self._known_faces)
+                if self._face_recognition_enabled and self._known_faces:
+                    identities = insightface_stub.identify(
+                        frame, detections, self._known_faces,
+                        check_front_facing=self._face_check_front,
+                    )
+                else:
+                    identities = {d["track_id"]: None for d in detections}
 
                 # Clean up Redis photo keys for tracks that have disappeared
                 current_ids = {d["track_id"] for d in detections}

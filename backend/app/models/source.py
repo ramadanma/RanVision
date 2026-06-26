@@ -41,6 +41,7 @@ class Source(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     show_overlay: Mapped[bool] = mapped_column(Boolean, default=True)
     face_recognition_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    face_check_front: Mapped[bool] = mapped_column(Boolean, default=False)
     hls_output_dir: Mapped[str | None] = mapped_column(String(512))
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

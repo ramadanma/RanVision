@@ -10,6 +10,7 @@ export const startSource = (id: number) => client.post<Source>(`/sources/${id}/s
 export const stopSource = (id: number) => client.post<Source>(`/sources/${id}/stop`)
 export const toggleOverlay = (id: number) => client.patch<Source>(`/sources/${id}/overlay`)
 export const toggleFaceRecognition = (id: number) => client.patch<Source>(`/sources/${id}/face-recognition`)
+export const toggleFaceCheckFront = (id: number) => client.patch<Source>(`/sources/${id}/face-check-front`)
 export const uploadVideo = (file: File) => {
   const form = new FormData()
   form.append('file', file)

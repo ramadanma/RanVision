@@ -120,3 +120,16 @@ async def toggle_face_recognition(
     await db.commit()
     await db.refresh(source)
     return source
+
+
+@router.patch("/{source_id}/face-check-front", response_model=SourceOut)
+async def toggle_face_check_front(
+    source_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    source = await source_service.get_source(db, source_id, current_user.id)
+    source.face_check_front = not source.face_check_front
+    await db.commit()
+    await db.refresh(source)
+    return source

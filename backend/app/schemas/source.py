@@ -36,6 +36,7 @@ class SourceOut(BaseModel):
     is_active: bool
     show_overlay: bool
     face_recognition_enabled: bool
+    face_check_front: bool
     created_at: datetime
     updated_at: datetime
 

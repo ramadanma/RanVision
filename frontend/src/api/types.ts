@@ -18,6 +18,7 @@ export interface Source {
   is_active: boolean
   show_overlay: boolean
   face_recognition_enabled: boolean
+  face_check_front: boolean
   created_at: string
   updated_at: string
 }

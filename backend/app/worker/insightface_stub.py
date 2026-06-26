@@ -92,6 +92,27 @@ def _stable_identity(track_id: int, name: str, conf: float) -> str:
     return max(avg, key=avg.get)
 
 
+def _is_front_facing(kps: list) -> bool:
+    """
+    Three-tier front-facing check (ported from demo.py _is_front_facing).
+
+    Tier 1: any frontal keypoint (nose/left_eye/right_eye) visible → front-facing → True
+    Tier 2: no frontal kps AND both ears visible → confirmed back-facing → False
+    Tier 3: nothing visible (far/low-res) → default True (don't block)
+
+    COCO keypoint order: 0=nose 1=left_eye 2=right_eye 3=left_ear 4=right_ear
+    """
+    CONF = 0.3
+    if len(kps) < 5:
+        return True
+    nose, left_eye, right_eye, left_ear, right_ear = kps[0], kps[1], kps[2], kps[3], kps[4]
+    if nose[2] > CONF or left_eye[2] > CONF or right_eye[2] > CONF:
+        return True
+    if left_ear[2] > CONF and right_ear[2] > CONF:
+        return False
+    return True
+
+
 def extract_embedding(image: np.ndarray) -> np.ndarray | None:
     """Extract normed face embedding from an image (used at upload time)."""
     try:
@@ -110,12 +131,16 @@ def identify(
     frame: np.ndarray,
     detections: list[dict],
     known: list[tuple[str, np.ndarray]],
+    check_front_facing: bool = False,
 ) -> dict[int, str | None]:
     """
     Identify persons in frame.
     Crops the face region per detection (keypoints → bbox fallback),
     runs InsightFace on the crop, and stabilises identity over 20 frames.
     Returns {track_id: person_name | None}.
+
+    check_front_facing: when True, skip detections where the person is
+    confirmed back-facing (both ears visible, no nose/eyes).
     """
     result: dict[int, str | None] = {d["track_id"]: None for d in detections}
     if not detections or not known:
@@ -129,6 +154,12 @@ def identify(
 
         for det in detections:
             track_id = det["track_id"]
+            kps = det.get("keypoints", [])
+
+            if check_front_facing and not _is_front_facing(kps):
+                logger.debug("Track %d skipped: confirmed back-facing", track_id)
+                continue
+
             face_img = _crop_face(frame, det)
             if face_img is None or face_img.size == 0:
                 continue

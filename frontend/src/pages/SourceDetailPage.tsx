@@ -2,7 +2,7 @@ import { ArrowLeftOutlined } from '@ant-design/icons'
 import { Button, Col, Row, Spin, Switch, Tabs, Typography, message } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { getSource, toggleFaceRecognition, toggleOverlay } from '../api/sources'
+import { getSource, toggleFaceCheckFront, toggleFaceRecognition, toggleOverlay } from '../api/sources'
 import { listZones } from '../api/zones'
 import HlsPlayer from '../components/player/HlsPlayer'
 import ZoneCanvas from '../components/zone/ZoneCanvas'
@@ -43,6 +43,11 @@ export default function SourceDetailPage() {
     setSource(res.data)
   }
 
+  const handleToggleFaceCheckFront = async () => {
+    const res = await toggleFaceCheckFront(sourceId)
+    setSource(res.data)
+  }
+
   if (loading) return <Spin style={{ padding: 40 }} />
   if (!source) return <div>源不存在</div>
 
@@ -75,6 +80,14 @@ export default function SourceDetailPage() {
                       onChange={handleToggleFaceRecognition}
                       checkedChildren="人脸识别开"
                       unCheckedChildren="人脸识别关"
+                    />
+                  </Col>
+                  <Col>
+                    <Switch
+                      checked={source.face_check_front}
+                      onChange={handleToggleFaceCheckFront}
+                      checkedChildren="仅正面识别"
+                      unCheckedChildren="正面检测关"
                     />
                   </Col>
                 </Row>
