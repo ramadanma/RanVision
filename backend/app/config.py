@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # Phase 2: ML inference
     YOLO_MODEL_PATH: str = "yolov8n-pose.pt"  # auto-downloaded on first run
     GPU_COUNT: int = 4                          # number of CUDA devices on server
-    FACE_SIM_THRESHOLD: float = 0.5            # cosine similarity threshold
+    FACE_SIM_THRESHOLD: float = 0.35           # cosine similarity threshold (buffalo_l, normed embs)
 
     @property
     def uploads_videos(self) -> str:

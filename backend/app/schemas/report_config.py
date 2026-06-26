@@ -11,6 +11,8 @@ class ReportConfigCreate(BaseModel):
     photo_count: int = 0
     include_person_name: bool = False
     save_records: bool = True
+    subject_template: str | None = None
+    body_template: str | None = None
 
 
 class ReportConfigUpdate(BaseModel):
@@ -21,6 +23,8 @@ class ReportConfigUpdate(BaseModel):
     include_person_name: bool | None = None
     save_records: bool | None = None
     is_enabled: bool | None = None
+    subject_template: str | None = None
+    body_template: str | None = None
 
 
 class ReportConfigOut(BaseModel):
@@ -33,6 +37,8 @@ class ReportConfigOut(BaseModel):
     include_person_name: bool
     save_records: bool
     is_enabled: bool
+    subject_template: str | None
+    body_template: str | None
     trigger_rule_ids: list[int] = []
     created_at: datetime
     updated_at: datetime

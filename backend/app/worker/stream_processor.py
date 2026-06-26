@@ -13,6 +13,14 @@ from app.worker.rule_engine import rule_engine
 
 logger = logging.getLogger(__name__)
 
+
+def _render_template(template: str, context: dict) -> str:
+    """Replace {{variable}} placeholders with values from context."""
+    for key, value in context.items():
+        template = template.replace(f"{{{{{key}}}}}", value)
+    return template
+
+
 CONFIG_RELOAD_INTERVAL = 5.0     # seconds between zone/face reloads
 FACE_RELOAD_INTERVAL = 60.0      # seconds between face embedding reloads
 PHOTO_MAX_FRAMES = 300           # max frames cached per track in Redis
@@ -390,13 +398,23 @@ class StreamProcessor(threading.Thread):
                             await redis.delete(key)
 
                         person_name = event.get("person_name") if config.include_person_name else None
-                        subject = f"[RanVision] 规则触发: #{event['rule_id']}"
-                        body = (
+                        tpl_ctx = {
+                            "source_id": str(self.source_id),
+                            "zone_id": str(event["zone_id"]),
+                            "rule_id": str(event["rule_id"]),
+                            "person_name": person_name or "",
+                            "triggered_at": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "details": json.dumps(event.get("snapshot", {}), ensure_ascii=False),
+                        }
+                        default_subject = f"[RanVision] 规则触发: #{event['rule_id']}"
+                        default_body = (
                             f"Source: {self.source_id}\nZone: {event['zone_id']}\n"
                             f"Rule: {event['rule_id']}\n"
                             + (f"Person: {person_name}\n" if person_name else "")
                             + f"Details: {json.dumps(event.get('snapshot', {}), ensure_ascii=False)}"
                         )
+                        subject = _render_template(config.subject_template, tpl_ctx) if config.subject_template else default_subject
+                        body = _render_template(config.body_template, tpl_ctx) if config.body_template else default_body
 
                         smtp_cfg = await get_smtp_config_dict(db) if config.delivery_method == "email" else {}
                         await send_alert(config.delivery_method, config.destination, subject, body, photos, smtp_cfg=smtp_cfg)

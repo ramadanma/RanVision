@@ -175,7 +175,15 @@ def identify(
             best_idx = int(np.argmax(sims))
             best_sim = float(sims[best_idx])
 
-            name = known_names[best_idx] if best_sim >= settings.FACE_SIM_THRESHOLD else "unknown"
+            if best_sim >= settings.FACE_SIM_THRESHOLD:
+                name = known_names[best_idx]
+                logger.info("Track %d recognized as '%s' (sim=%.3f)", track_id, name, best_sim)
+            else:
+                name = "unknown"
+                logger.debug(
+                    "Track %d not recognized: best='%s' sim=%.3f < threshold=%.2f",
+                    track_id, known_names[best_idx], best_sim, settings.FACE_SIM_THRESHOLD,
+                )
             stable = _stable_identity(track_id, name, best_sim)
             if stable != "unknown":
                 result[track_id] = stable

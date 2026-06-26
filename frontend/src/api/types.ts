@@ -68,6 +68,8 @@ export interface ReportConfig {
   include_person_name: boolean
   save_records: boolean
   is_enabled: boolean
+  subject_template: string | null
+  body_template: string | null
   trigger_rule_ids: number[]
   created_at: string
   updated_at: string
