@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -6,6 +7,10 @@ from app.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.source import SourceCreate, SourceOut, SourceUpdate
 from app.services import source_service
+
+
+class DetectionRoiUpdate(BaseModel):
+    roi_json: str | None = None
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
@@ -130,6 +135,33 @@ async def toggle_face_check_front(
 ):
     source = await source_service.get_source(db, source_id, current_user.id)
     source.face_check_front = not source.face_check_front
+    await db.commit()
+    await db.refresh(source)
+    return source
+
+
+@router.patch("/{source_id}/show-skeleton", response_model=SourceOut)
+async def toggle_show_skeleton(
+    source_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    source = await source_service.get_source(db, source_id, current_user.id)
+    source.show_skeleton = not source.show_skeleton
+    await db.commit()
+    await db.refresh(source)
+    return source
+
+
+@router.patch("/{source_id}/detection-roi", response_model=SourceOut)
+async def update_detection_roi(
+    source_id: int,
+    body: DetectionRoiUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    source = await source_service.get_source(db, source_id, current_user.id)
+    source.detection_roi_json = body.roi_json
     await db.commit()
     await db.refresh(source)
     return source

@@ -26,6 +26,15 @@ FACE_RELOAD_INTERVAL = 60.0      # seconds between face embedding reloads
 PHOTO_MAX_FRAMES = 300           # max frames cached per track in Redis
 PHOTO_TTL = 300                  # seconds
 
+# COCO 17-keypoint skeleton connections
+COCO_SKELETON = [
+    (0, 1), (0, 2), (1, 3), (2, 4),       # head
+    (5, 6),                                  # shoulders
+    (5, 7), (7, 9), (6, 8), (8, 10),       # arms
+    (5, 11), (6, 12), (11, 12),             # torso
+    (11, 13), (13, 15), (12, 14), (14, 16), # legs
+]
+
 
 @asynccontextmanager
 async def _thread_db():
@@ -55,6 +64,8 @@ class StreamProcessor(threading.Thread):
         self._active_track_ids: set[int] = set()
         self._face_recognition_enabled: bool = True
         self._face_check_front: bool = False
+        self._show_skeleton: bool = False
+        self._detection_roi: np.ndarray | None = None
 
         from app.config import settings
         self._device = source_id % max(settings.GPU_COUNT, 1)
@@ -111,15 +122,61 @@ class StreamProcessor(threading.Thread):
                 result = await db.execute(select(Source).where(Source.id == self.source_id))
                 source = result.scalar_one_or_none()
                 if source:
-                    return source.face_recognition_enabled, source.face_check_front
-                return True, False
+                    return (
+                        source.face_recognition_enabled,
+                        source.face_check_front,
+                        source.show_skeleton,
+                        source.detection_roi_json,
+                    )
+                return True, False, False, None
 
         try:
-            enabled, check_front = self._run_async(_fetch())
+            enabled, check_front, show_skeleton, roi_json = self._run_async(_fetch())
             self._face_recognition_enabled = enabled
             self._face_check_front = check_front
+            self._show_skeleton = show_skeleton
+            if roi_json:
+                import json
+                self._detection_roi = np.array(json.loads(roi_json), dtype=np.float32)
+            else:
+                self._detection_roi = None
         except Exception as e:
             logger.warning("Source flags reload failed for source %d: %s", self.source_id, e)
+
+    # ── ROI filter ───────────────────────────────────────────────────────────
+
+    def _filter_by_roi(self, detections: list[dict], frame_shape: tuple) -> list[dict]:
+        """Keep only detections whose bbox centre is inside the detection ROI polygon."""
+        if self._detection_roi is None or len(detections) == 0:
+            return detections
+        h, w = frame_shape[:2]
+        roi_px = (self._detection_roi * np.array([w, h])).astype(np.int32)
+        filtered = []
+        for det in detections:
+            bbox = det["bbox"]
+            cx = int((bbox[0] + bbox[2]) / 2)
+            cy = int((bbox[1] + bbox[3]) / 2)
+            if cv2.pointPolygonTest(roi_px, (float(cx), float(cy)), False) >= 0:
+                filtered.append(det)
+        return filtered
+
+    # ── Skeleton draw ─────────────────────────────────────────────────────────
+
+    def _draw_skeleton(self, frame: np.ndarray, detections: list[dict]) -> None:
+        """Draw COCO skeleton overlay on frame in-place."""
+        for det in detections:
+            kps = det.get("keypoints", [])
+            if len(kps) < 17:
+                continue
+            for a, b in COCO_SKELETON:
+                if kps[a][2] > 0.3 and kps[b][2] > 0.3:
+                    cv2.line(frame,
+                             (int(kps[a][0]), int(kps[a][1])),
+                             (int(kps[b][0]), int(kps[b][1])),
+                             (0, 255, 0), 2)
+            for kp in kps:
+                if kp[2] > 0.3:
+                    cv2.circle(frame, (int(kp[0]), int(kp[1])), 3, (0, 255, 255), -1)
 
     # ── Face embedding reload ─────────────────────────────────────────────────
 
@@ -228,14 +285,21 @@ class StreamProcessor(threading.Thread):
                 fail_count = 0
                 frame_count += 1
 
-                # Push every Nth frame to WebSocket buffer
+                detections = yolo_stub.infer(frame, device=self._device)
+                detections = self._filter_by_roi(detections, frame.shape)
+
+                # Push every Nth frame to WebSocket buffer (with optional skeleton overlay)
                 if frame_count % self._PUSH_EVERY_N == 0:
-                    _, jpeg_buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    if self._show_skeleton and detections:
+                        display = frame.copy()
+                        self._draw_skeleton(display, detections)
+                    else:
+                        display = frame
+                    _, jpeg_buf = cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 70])
                     frame_buffer.push(self.source_id, jpeg_buf.tobytes())
                     if frame_count == self._PUSH_EVERY_N:
                         logger.info("First frame pushed to buffer for source %d", self.source_id)
 
-                detections = yolo_stub.infer(frame, device=self._device)
                 if self._face_recognition_enabled and self._known_faces:
                     identities = insightface_stub.identify(
                         frame, detections, self._known_faces,

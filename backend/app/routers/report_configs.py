@@ -62,7 +62,7 @@ async def update_report_config(
 ):
     config = await report_config_service.get_report_config(db, config_id)
     await _verify_source_ownership(config.source_id, current_user, db)
-    config = await report_config_service.update_report_config(db, config, body.model_dump(exclude_none=True))
+    config = await report_config_service.update_report_config(db, config, body.model_dump(exclude_unset=True))
     return _to_out(config)
 
 

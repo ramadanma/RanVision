@@ -19,6 +19,8 @@ export interface Source {
   show_overlay: boolean
   face_recognition_enabled: boolean
   face_check_front: boolean
+  show_skeleton: boolean
+  detection_roi_json: string | null
   created_at: string
   updated_at: string
 }

@@ -11,6 +11,9 @@ export const stopSource = (id: number) => client.post<Source>(`/sources/${id}/st
 export const toggleOverlay = (id: number) => client.patch<Source>(`/sources/${id}/overlay`)
 export const toggleFaceRecognition = (id: number) => client.patch<Source>(`/sources/${id}/face-recognition`)
 export const toggleFaceCheckFront = (id: number) => client.patch<Source>(`/sources/${id}/face-check-front`)
+export const toggleSkeleton = (id: number) => client.patch<Source>(`/sources/${id}/show-skeleton`)
+export const updateDetectionRoi = (id: number, roi_json: string | null) =>
+  client.patch<Source>(`/sources/${id}/detection-roi`, { roi_json })
 export const uploadVideo = (file: File) => {
   const form = new FormData()
   form.append('file', file)

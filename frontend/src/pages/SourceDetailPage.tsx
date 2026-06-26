@@ -1,10 +1,11 @@
 import { ArrowLeftOutlined } from '@ant-design/icons'
-import { Button, Col, Row, Spin, Switch, Tabs, Typography, message } from 'antd'
+import { Button, Col, Row, Spin, Switch, Tabs, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { getSource, toggleFaceCheckFront, toggleFaceRecognition, toggleOverlay } from '../api/sources'
+import { getSource, toggleFaceCheckFront, toggleFaceRecognition, toggleOverlay, toggleSkeleton } from '../api/sources'
 import { listZones } from '../api/zones'
 import HlsPlayer from '../components/player/HlsPlayer'
+import RoiCanvas from '../components/zone/RoiCanvas'
 import ZoneCanvas from '../components/zone/ZoneCanvas'
 import ZoneList from '../components/zone/ZoneList'
 import ReportConfigPanel from './ReportConfigPanel'
@@ -45,6 +46,11 @@ export default function SourceDetailPage() {
 
   const handleToggleFaceCheckFront = async () => {
     const res = await toggleFaceCheckFront(sourceId)
+    setSource(res.data)
+  }
+
+  const handleToggleSkeleton = async () => {
+    const res = await toggleSkeleton(sourceId)
     setSource(res.data)
   }
 
@@ -90,6 +96,14 @@ export default function SourceDetailPage() {
                       unCheckedChildren="正面检测关"
                     />
                   </Col>
+                  <Col>
+                    <Switch
+                      checked={source.show_skeleton}
+                      onChange={handleToggleSkeleton}
+                      checkedChildren="骨架显示"
+                      unCheckedChildren="骨架隐藏"
+                    />
+                  </Col>
                 </Row>
                 {source.is_active ? (
                   <HlsPlayer sourceId={sourceId} zones={zones} showOverlay={source.show_overlay} />
@@ -120,6 +134,17 @@ export default function SourceDetailPage() {
                   />
                 </Col>
               </Row>
+            ),
+          },
+          {
+            key: 'roi',
+            label: '侦测ROI',
+            children: (
+              <RoiCanvas
+                sourceId={sourceId}
+                roiJson={source.detection_roi_json}
+                onRoiUpdated={(roi) => setSource((prev) => prev ? { ...prev, detection_roi_json: roi } : prev)}
+              />
             ),
           },
           {

@@ -175,6 +175,15 @@ def identify(
 
             # Use the largest detected face in the crop
             face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+
+            # Use InsightFace's own pose estimation for a more accurate front-facing check
+            if check_front_facing and hasattr(face, "pose") and face.pose is not None:
+                yaw = float(face.pose[0])
+                if abs(yaw) > 40:
+                    logger.debug("Track %d skipped: InsightFace yaw=%.1f°", track_id, yaw)
+                    _stable_identity(track_id, "unknown", 0.0)
+                    continue
+
             sims = known_embs @ face.normed_embedding
             best_idx = int(np.argmax(sims))
             best_sim = float(sims[best_idx])

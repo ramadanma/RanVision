@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -42,6 +42,8 @@ class Source(Base):
     show_overlay: Mapped[bool] = mapped_column(Boolean, default=True)
     face_recognition_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     face_check_front: Mapped[bool] = mapped_column(Boolean, default=False)
+    show_skeleton: Mapped[bool] = mapped_column(Boolean, default=False)
+    detection_roi_json: Mapped[str | None] = mapped_column(Text)
     hls_output_dir: Mapped[str | None] = mapped_column(String(512))
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

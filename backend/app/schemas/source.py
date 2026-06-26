@@ -37,6 +37,8 @@ class SourceOut(BaseModel):
     show_overlay: bool
     face_recognition_enabled: bool
     face_check_front: bool
+    show_skeleton: bool
+    detection_roi_json: str | None
     created_at: datetime
     updated_at: datetime
 
