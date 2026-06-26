@@ -23,15 +23,20 @@ def _get_model(device: int):
 
 
 def reset_tracker(device: int = 0) -> None:
-    """Reset the tracker state after a stream reconnect."""
+    """Reset the tracker state after a stream reconnect.
+
+    Sets predictor to None so ultralytics re-initializes it (including a fresh
+    tracker) on the next model.track() call. This avoids the 'NoneType has no
+    attribute update' crash that occurs when individual tracker slots are set to None.
+    """
     with _lock:
         model = _models.get(device)
         if model is None:
             return
         try:
             if hasattr(model, "predictor") and model.predictor is not None:
-                if hasattr(model.predictor, "trackers"):
-                    model.predictor.trackers = [None] * len(model.predictor.trackers)
+                model.predictor = None
+                logger.debug("Tracker reset for device=%d", device)
         except Exception as e:
             logger.debug("Tracker reset warning (device=%d): %s", device, e)
 
