@@ -1,6 +1,13 @@
-"""Per-source detection worker thread."""
+"""Per-source detection worker thread.
+
+Three-thread architecture:
+  reader thread   — cap.read() + frame_buffer push (never blocked by GPU)
+  inference thread (main) — YOLO + face + rule evaluation
+  trigger thread  — DB write + alert delivery (never blocks inference)
+"""
 import asyncio
 import logging
+import queue
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -28,11 +35,11 @@ PHOTO_TTL = 300                  # seconds
 
 # COCO 17-keypoint skeleton connections
 COCO_SKELETON = [
-    (0, 1), (0, 2), (1, 3), (2, 4),       # head
-    (5, 6),                                  # shoulders
-    (5, 7), (7, 9), (6, 8), (8, 10),       # arms
-    (5, 11), (6, 12), (11, 12),             # torso
-    (11, 13), (13, 15), (12, 14), (14, 16), # legs
+    (0, 1), (0, 2), (1, 3), (2, 4),
+    (5, 6),
+    (5, 7), (7, 9), (6, 8), (8, 10),
+    (5, 11), (6, 12), (11, 12),
+    (11, 13), (13, 15), (12, 14), (14, 16),
 ]
 
 
@@ -67,6 +74,16 @@ class StreamProcessor(threading.Thread):
         self._show_skeleton: bool = False
         self._detection_roi: np.ndarray | None = None
 
+        # Latest detections — written by inference thread, read by reader thread (GIL-safe)
+        self._prev_detections: list = []
+        # Set by reader thread on reconnect; cleared by inference thread after cleanup
+        self._reconnect_signal: bool = False
+
+        # Frame queue: reader → inference (bounded; drop stale frames on full)
+        self._infer_q: queue.Queue = queue.Queue(maxsize=2)
+        # Trigger queue: inference → I/O worker (unbounded — never drop events)
+        self._trigger_q: queue.Queue = queue.Queue()
+
         from app.config import settings
         self._device = source_id % max(settings.GPU_COUNT, 1)
 
@@ -74,22 +91,13 @@ class StreamProcessor(threading.Thread):
         self._stop_event.set()
 
     def _run_async(self, coro):
-        """Run a coroutine on this thread's persistent event loop.
-
-        Using a single loop per thread (instead of asyncio.run which creates
-        and *closes* a new loop each call) prevents 'Event loop is closed'
-        errors from SQLAlchemy / Redis connection-pool cleanup tasks that are
-        still alive between calls.
-
-        Always calls set_event_loop to restore the thread's current loop in
-        case any third-party code (e.g. asyncio.run) reset it to None.
-        """
+        """Run a coroutine on this thread's persistent event loop."""
         if self._loop is None or self._loop.is_closed():
             self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         return self._loop.run_until_complete(coro)
 
-    # ── Zone reload ──────────────────────────────────────────────────────────
+    # ── Zone / source-flag / face reload (called from inference thread) ───────
 
     def _reload_zones(self) -> None:
         from app.models.zone import Zone
@@ -111,8 +119,6 @@ class StreamProcessor(threading.Thread):
             logger.info("Source %d: loaded %d zone(s) with %d rule(s)", self.source_id, len(self._zones), total_rules)
         except Exception as e:
             logger.warning("Zone reload failed for source %d: %s", self.source_id, e)
-
-    # ── Source flags reload ──────────────────────────────────────────────────
 
     def _reload_source_flags(self) -> None:
         async def _fetch():
@@ -143,45 +149,7 @@ class StreamProcessor(threading.Thread):
         except Exception as e:
             logger.warning("Source flags reload failed for source %d: %s", self.source_id, e)
 
-    # ── ROI filter ───────────────────────────────────────────────────────────
-
-    def _filter_by_roi(self, detections: list[dict], frame_shape: tuple) -> list[dict]:
-        """Keep only detections whose bbox centre is inside the detection ROI polygon."""
-        if self._detection_roi is None or len(detections) == 0:
-            return detections
-        h, w = frame_shape[:2]
-        roi_px = (self._detection_roi * np.array([w, h])).astype(np.int32)
-        filtered = []
-        for det in detections:
-            bbox = det["bbox"]
-            cx = int((bbox[0] + bbox[2]) / 2)
-            cy = int((bbox[1] + bbox[3]) / 2)
-            if cv2.pointPolygonTest(roi_px, (float(cx), float(cy)), False) >= 0:
-                filtered.append(det)
-        return filtered
-
-    # ── Skeleton draw ─────────────────────────────────────────────────────────
-
-    def _draw_skeleton(self, frame: np.ndarray, detections: list[dict]) -> None:
-        """Draw COCO skeleton overlay on frame in-place."""
-        for det in detections:
-            kps = det.get("keypoints", [])
-            if len(kps) < 17:
-                continue
-            for a, b in COCO_SKELETON:
-                if kps[a][2] > 0.3 and kps[b][2] > 0.3:
-                    cv2.line(frame,
-                             (int(kps[a][0]), int(kps[a][1])),
-                             (int(kps[b][0]), int(kps[b][1])),
-                             (0, 255, 0), 2)
-            for kp in kps:
-                if kp[2] > 0.3:
-                    cv2.circle(frame, (int(kp[0]), int(kp[1])), 3, (0, 255, 255), -1)
-
-    # ── Face embedding reload ─────────────────────────────────────────────────
-
     def _reload_faces(self) -> None:
-        """Load face embeddings via the thread's own event loop (avoids asyncio.run interference)."""
         async def _fetch():
             from sqlalchemy import select
             from app.models.face import Face
@@ -207,10 +175,42 @@ class StreamProcessor(threading.Thread):
         except Exception as e:
             logger.warning("Face reload failed for user %d: %s", self.user_id, e)
 
+    # ── ROI filter ────────────────────────────────────────────────────────────
+
+    def _filter_by_roi(self, detections: list[dict], frame_shape: tuple) -> list[dict]:
+        if self._detection_roi is None or len(detections) == 0:
+            return detections
+        h, w = frame_shape[:2]
+        roi_px = (self._detection_roi * np.array([w, h])).astype(np.int32)
+        filtered = []
+        for det in detections:
+            bbox = det["bbox"]
+            cx = int((bbox[0] + bbox[2]) / 2)
+            cy = int((bbox[1] + bbox[3]) / 2)
+            if cv2.pointPolygonTest(roi_px, (float(cx), float(cy)), False) >= 0:
+                filtered.append(det)
+        return filtered
+
+    # ── Skeleton draw ─────────────────────────────────────────────────────────
+
+    def _draw_skeleton(self, frame: np.ndarray, detections: list[dict]) -> None:
+        for det in detections:
+            kps = det.get("keypoints", [])
+            if len(kps) < 17:
+                continue
+            for a, b in COCO_SKELETON:
+                if kps[a][2] > 0.3 and kps[b][2] > 0.3:
+                    cv2.line(frame,
+                             (int(kps[a][0]), int(kps[a][1])),
+                             (int(kps[b][0]), int(kps[b][1])),
+                             (0, 255, 0), 2)
+            for kp in kps:
+                if kp[2] > 0.3:
+                    cv2.circle(frame, (int(kp[0]), int(kp[1])), 3, (0, 255, 255), -1)
+
     # ── Direct source URL ────────────────────────────────────────────────────
 
     def _get_capture_url(self) -> str | None:
-        """Load source from DB and return direct capture URL (RTSP or file path)."""
         async def _fetch():
             from sqlalchemy import select
             from app.models.source import Source
@@ -229,10 +229,117 @@ class StreamProcessor(threading.Thread):
             logger.error("Failed to get capture URL for source %d: %s", self.source_id, e)
             return None
 
-    # ── Main loop ─────────────────────────────────────────────────────────────
+    # ── Reader thread ─────────────────────────────────────────────────────────
 
-    # Push every Nth frame to keep WebSocket ~15 fps regardless of source fps
-    _PUSH_EVERY_N = 2
+    _PUSH_EVERY_N = 2  # keep WebSocket display ~15 fps on a 30fps source
+
+    def _reader_loop(self, url: str) -> None:
+        """Dedicated read thread: cap.read() + display push + enqueue for inference.
+
+        Completely decoupled from GPU speed so display latency is never gated
+        by YOLO inference time.  Uses a bounded queue with drop-on-full so the
+        inference thread always works on a recent frame, not a stale backlog.
+        """
+        from app.services.frame_buffer import frame_buffer
+
+        cap = cv2.VideoCapture(url)
+        if not cap.isOpened():
+            logger.error("Reader: cannot open video for source %d (url=%s)", self.source_id, url)
+            self._stop_event.set()
+            return
+        logger.info("Reader: capture opened for source %d", self.source_id)
+
+        frame_count = 0
+        fail_count = 0
+
+        try:
+            while not self._stop_event.is_set():
+                ret, frame = cap.read()
+                if not ret:
+                    fail_count += 1
+                    if fail_count >= 10:
+                        logger.info("Reader: reopening capture for source %d", self.source_id)
+                        cap.release()
+                        time.sleep(1)
+                        cap = cv2.VideoCapture(url)
+                        # Signal inference thread to reset tracker + clean Redis
+                        self._reconnect_signal = True
+                        self._prev_detections = []
+                        fail_count = 0
+                    else:
+                        time.sleep(0.05)
+                    continue
+                fail_count = 0
+                frame_count += 1
+
+                # Push to display buffer — skeleton overlay uses latest inference results
+                if frame_count % self._PUSH_EVERY_N == 0:
+                    prev = list(self._prev_detections)
+                    if self._show_skeleton and prev:
+                        display = frame.copy()
+                        self._draw_skeleton(display, prev)
+                    else:
+                        display = frame
+                    _, jpeg_buf = cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    frame_buffer.push(self.source_id, jpeg_buf.tobytes())
+                    if frame_count == self._PUSH_EVERY_N:
+                        logger.info("Reader: first frame pushed for source %d", self.source_id)
+
+                # Drop stale frame if inference is falling behind
+                if self._infer_q.full():
+                    try:
+                        self._infer_q.get_nowait()
+                    except queue.Empty:
+                        pass
+                try:
+                    self._infer_q.put_nowait(frame)
+                except queue.Full:
+                    pass
+        finally:
+            cap.release()
+            frame_buffer.clear(self.source_id)
+            logger.info("Reader: stopped for source %d", self.source_id)
+
+    # ── Trigger I/O worker thread ─────────────────────────────────────────────
+
+    def _trigger_worker_loop(self) -> None:
+        """Dedicated I/O thread: handles DB writes and alert delivery per trigger event.
+
+        Runs on its own event loop and its own Redis client so it never blocks
+        the inference thread and avoids event-loop conflicts with the inference
+        thread's _run_async loop.
+        """
+        import redis.asyncio as aioredis
+        from app.config import settings
+
+        io_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(io_loop)
+
+        async def _run() -> None:
+            redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=False)
+            try:
+                while not self._stop_event.is_set() or not self._trigger_q.empty():
+                    try:
+                        event = self._trigger_q.get_nowait()
+                    except queue.Empty:
+                        await asyncio.sleep(0.1)
+                        continue
+                    try:
+                        await self._handle_trigger(event, redis_client)
+                    except Exception as e:
+                        logger.error("Trigger I/O error for source %d: %s", self.source_id, e)
+                    finally:
+                        self._trigger_q.task_done()
+            finally:
+                await redis_client.aclose()
+
+        try:
+            io_loop.run_until_complete(_run())
+        finally:
+            io_loop.close()
+            logger.info("Trigger worker stopped for source %d", self.source_id)
+
+    # ── Main loop (inference) ─────────────────────────────────────────────────
 
     def run(self) -> None:
         logger.info("StreamProcessor started for source %d (device=cuda:%d)", self.source_id, self._device)
@@ -241,18 +348,19 @@ class StreamProcessor(threading.Thread):
             logger.error("Cannot resolve capture URL for source %d, worker exiting", self.source_id)
             return
 
-        logger.info("StreamProcessor source %d opening: %s", self.source_id, url)
-        cap = cv2.VideoCapture(url)
-        if not cap.isOpened():
-            logger.error("Cannot open video for source %d (url=%s)", self.source_id, url)
-            return
-        logger.info("StreamProcessor source %d capture opened successfully", self.source_id)
+        reader_t = threading.Thread(
+            target=self._reader_loop, args=(url,),
+            name=f"reader-{self.source_id}", daemon=True,
+        )
+        reader_t.start()
 
-        from app.services.frame_buffer import frame_buffer
+        trigger_t = threading.Thread(
+            target=self._trigger_worker_loop,
+            name=f"trigger-{self.source_id}", daemon=True,
+        )
+        trigger_t.start()
+
         frame_count = 0
-        fail_count = 0
-        prev_detections: list = []  # previous frame's detections for skeleton overlay
-
         try:
             while not self._stop_event.is_set():
                 now = time.time()
@@ -266,44 +374,22 @@ class StreamProcessor(threading.Thread):
                     self._reload_faces()
                     self._last_face_reload = now
 
-                ret, frame = cap.read()
-                if not ret:
-                    fail_count += 1
-                    if fail_count >= 10:
-                        # EOF or stream drop — reopen
-                        logger.info("Reopening capture for source %d (EOF/disconnect after %d fails)", self.source_id, fail_count)
-                        cap.release()
-                        time.sleep(1)
-                        cap = cv2.VideoCapture(url)
-                        yolo_stub.reset_tracker(self._device)
-                        # Clear stale photo keys so recycled track IDs don't get old frames
-                        self._delete_photo_keys(self._active_track_ids)
-                        self._active_track_ids.clear()
-                        prev_detections = []
-                        fail_count = 0
-                    else:
-                        time.sleep(0.1)
+                # Handle stream reconnect signaled by reader thread
+                if self._reconnect_signal:
+                    yolo_stub.reset_tracker(self._device)
+                    self._delete_photo_keys(self._active_track_ids)
+                    self._active_track_ids.clear()
+                    self._reconnect_signal = False
+
+                try:
+                    frame = self._infer_q.get(timeout=1.0)
+                except queue.Empty:
                     continue
-                fail_count = 0
+
                 frame_count += 1
-
-                # Push frame BEFORE YOLO inference so display latency is never
-                # gated by YOLO speed. Skeleton uses prev frame's detections
-                # (≤1 frame lag, imperceptible at normal playback speed).
-                if frame_count % self._PUSH_EVERY_N == 0:
-                    if self._show_skeleton and prev_detections:
-                        display = frame.copy()
-                        self._draw_skeleton(display, prev_detections)
-                    else:
-                        display = frame
-                    _, jpeg_buf = cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                    frame_buffer.push(self.source_id, jpeg_buf.tobytes())
-                    if frame_count == self._PUSH_EVERY_N:
-                        logger.info("First frame pushed to buffer for source %d", self.source_id)
-
                 detections = yolo_stub.infer(frame, device=self._device)
                 detections = self._filter_by_roi(detections, frame.shape)
-                prev_detections = detections
+                self._prev_detections = detections  # reader thread picks this up
 
                 if self._face_recognition_enabled and self._known_faces:
                     identities = insightface_stub.identify(
@@ -313,7 +399,6 @@ class StreamProcessor(threading.Thread):
                 else:
                     identities = {d["track_id"]: None for d in detections}
 
-                # Clean up Redis photo keys for tracks that have disappeared
                 current_ids = {d["track_id"] for d in detections}
                 gone_ids = self._active_track_ids - current_ids
                 if gone_ids:
@@ -322,11 +407,10 @@ class StreamProcessor(threading.Thread):
 
                 if frame_count % 150 == 0:
                     logger.info(
-                        "StreamProcessor source %d alive: %d frames processed, %d person(s) detected",
+                        "StreamProcessor source %d alive: %d frames inferred, %d person(s) detected",
                         self.source_id, frame_count, len(detections),
                     )
 
-                # Push frame to Redis for each tracked person in any zone
                 self._cache_photos(frame, detections)
 
                 rule_engine.evaluate(
@@ -338,8 +422,10 @@ class StreamProcessor(threading.Thread):
                     on_trigger_callback=self._on_trigger,
                 )
         finally:
-            cap.release()
-            frame_buffer.clear(self.source_id)
+            self._stop_event.set()
+            reader_t.join(timeout=5)
+            self._trigger_q.join()  # wait for any pending alert deliveries
+            trigger_t.join(timeout=10)
             if self._loop and not self._loop.is_closed():
                 self._loop.close()
             logger.info("StreamProcessor stopped for source %d", self.source_id)
@@ -347,7 +433,6 @@ class StreamProcessor(threading.Thread):
     # ── Photo key cleanup ────────────────────────────────────────────────────
 
     def _delete_photo_keys(self, track_ids: set[int]) -> None:
-        """Delete Redis photo keys for tracks that have left the scene."""
         if not track_ids:
             return
 
@@ -367,7 +452,6 @@ class StreamProcessor(threading.Thread):
     def _cache_photos(self, frame: np.ndarray, detections: list[dict]) -> None:
         if not detections or not self._zones:
             return
-        # Only cache for detections that are inside at least one zone
         in_zone_ids = set()
         for det in detections:
             for zone in self._zones:
@@ -408,102 +492,96 @@ class StreamProcessor(threading.Thread):
     # ── Trigger handler ───────────────────────────────────────────────────────
 
     def _on_trigger(self, event: dict) -> None:
-        import json
+        """Called from inference thread — enqueues event; returns immediately."""
         logger.info(
             "Rule triggered: source=%d rule=%d zone=%d track=%d snapshot=%s",
             self.source_id, event["rule_id"], event["zone_id"],
             event["track_id"], event.get("snapshot"),
         )
+        self._trigger_q.put(event)
 
-        async def _handle():
-            from app.models.trigger_record import TriggerRecord
-            from app.models.report_config import ReportConfig
-            from app.services.alert_service import _select_photos, send_alert
-            from app.services.smtp_config_service import get_smtp_config_dict
-            from sqlalchemy import select
-            from sqlalchemy.orm import selectinload
+    async def _handle_trigger(self, event: dict, redis_client) -> None:
+        """DB write + alert delivery — runs on the trigger worker's event loop."""
+        import json
+        from app.models.trigger_record import TriggerRecord
+        from app.models.report_config import ReportConfig
+        from app.services.alert_service import _select_photos, send_alert
+        from app.services.smtp_config_service import get_smtp_config_dict
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
 
-            async with _thread_db() as db:
-                # Always save a TriggerRecord — independent of report configs
-                record = TriggerRecord(
-                    source_id=self.source_id,
-                    rule_id=event["rule_id"],
-                    zone_id=event["zone_id"],
-                    person_name=event.get("person_name"),
-                    rule_snapshot_json=json.dumps(event.get("snapshot", {})),
-                    photos_sent=0,
-                    alert_delivered=False,
-                )
-                db.add(record)
-                await db.commit()
-                await db.refresh(record)
-                logger.info("TriggerRecord #%d saved for source %d", record.id, self.source_id)
+        async with _thread_db() as db:
+            record = TriggerRecord(
+                source_id=self.source_id,
+                rule_id=event["rule_id"],
+                zone_id=event["zone_id"],
+                person_name=event.get("person_name"),
+                rule_snapshot_json=json.dumps(event.get("snapshot", {})),
+                photos_sent=0,
+                alert_delivered=False,
+            )
+            db.add(record)
+            await db.commit()
+            await db.refresh(record)
+            logger.info("TriggerRecord #%d saved for source %d", record.id, self.source_id)
 
-                # Alert delivery — only for matching enabled report configs
-                result = await db.execute(
-                    select(ReportConfig)
-                    .where(ReportConfig.source_id == self.source_id, ReportConfig.is_enabled == True)
-                    .options(selectinload(ReportConfig.trigger_rules))
-                )
-                configs = list(result.scalars().all())
+            result = await db.execute(
+                select(ReportConfig)
+                .where(ReportConfig.source_id == self.source_id, ReportConfig.is_enabled == True)
+                .options(selectinload(ReportConfig.trigger_rules))
+            )
+            configs = list(result.scalars().all())
 
-                matched_any = False
-                for config in configs:
-                    rule_ids = [r.id for r in config.trigger_rules]
-                    if event["rule_id"] not in rule_ids:
-                        continue
-                    matched_any = True
+            matched_any = False
+            for config in configs:
+                rule_ids = [r.id for r in config.trigger_rules]
+                if event["rule_id"] not in rule_ids:
+                    continue
+                matched_any = True
 
-                    photos: list[bytes] = []
-                    delivered = False
-                    delivery_error = None
-                    try:
-                        if config.photo_count > 0:
-                            from app.services.redis_service import get_redis
-                            redis = await get_redis()
-                            key = f"photo:{self.source_id}:{event['track_id']}"
-                            raw_frames = await redis.lrange(key, 0, -1)
-                            photos = _select_photos(raw_frames, config.photo_count)
-                            await redis.delete(key)
+                photos: list[bytes] = []
+                delivered = False
+                delivery_error = None
+                try:
+                    if config.photo_count > 0:
+                        key = f"photo:{self.source_id}:{event['track_id']}"
+                        raw_frames = await redis_client.lrange(key, 0, -1)
+                        photos = _select_photos(raw_frames, config.photo_count)
+                        await redis_client.delete(key)
 
-                        person_name = event.get("person_name") if config.include_person_name else None
-                        tpl_ctx = {
-                            "source_id": str(self.source_id),
-                            "zone_id": str(event["zone_id"]),
-                            "rule_id": str(event["rule_id"]),
-                            "person_name": person_name or "",
-                            "triggered_at": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "details": json.dumps(event.get("snapshot", {}), ensure_ascii=False),
-                        }
-                        default_subject = f"[RanVision] 规则触发: #{event['rule_id']}"
-                        default_body = (
-                            f"Source: {self.source_id}\nZone: {event['zone_id']}\n"
-                            f"Rule: {event['rule_id']}\n"
-                            + (f"Person: {person_name}\n" if person_name else "")
-                            + f"Details: {json.dumps(event.get('snapshot', {}), ensure_ascii=False)}"
-                        )
-                        subject = _render_template(config.subject_template, tpl_ctx) if config.subject_template else default_subject
-                        body = _render_template(config.body_template, tpl_ctx) if config.body_template else default_body
-
-                        smtp_cfg = await get_smtp_config_dict(db) if config.delivery_method == "email" else {}
-                        await send_alert(config.delivery_method, config.destination, subject, body, photos, smtp_cfg=smtp_cfg)
-                        delivered = True
-                    except Exception as e:
-                        delivery_error = str(e)[:500]
-                        logger.error("Alert send failed for config %d source %d: %s", config.id, self.source_id, e)
-
-                    record.photos_sent = len(photos)
-                    record.alert_delivered = delivered
-                    record.delivery_error = delivery_error
-                    await db.commit()
-
-                if not matched_any:
-                    logger.info(
-                        "Rule %d fired for source %d but no report config has this rule linked",
-                        event["rule_id"], self.source_id,
+                    person_name = event.get("person_name") if config.include_person_name else None
+                    tpl_ctx = {
+                        "source_id": str(self.source_id),
+                        "zone_id": str(event["zone_id"]),
+                        "rule_id": str(event["rule_id"]),
+                        "person_name": person_name or "",
+                        "triggered_at": __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "details": json.dumps(event.get("snapshot", {}), ensure_ascii=False),
+                    }
+                    default_subject = f"[RanVision] 规则触发: #{event['rule_id']}"
+                    default_body = (
+                        f"Source: {self.source_id}\nZone: {event['zone_id']}\n"
+                        f"Rule: {event['rule_id']}\n"
+                        + (f"Person: {person_name}\n" if person_name else "")
+                        + f"Details: {json.dumps(event.get('snapshot', {}), ensure_ascii=False)}"
                     )
+                    subject = _render_template(config.subject_template, tpl_ctx) if config.subject_template else default_subject
+                    body = _render_template(config.body_template, tpl_ctx) if config.body_template else default_body
 
-        try:
-            self._run_async(_handle())
-        except Exception as e:
-            logger.error("Trigger handler error for source %d: %s", self.source_id, e)
+                    smtp_cfg = await get_smtp_config_dict(db) if config.delivery_method == "email" else {}
+                    await send_alert(config.delivery_method, config.destination, subject, body, photos, smtp_cfg=smtp_cfg)
+                    delivered = True
+                except Exception as e:
+                    delivery_error = str(e)[:500]
+                    logger.error("Alert send failed for config %d source %d: %s", config.id, self.source_id, e)
+
+                record.photos_sent = len(photos)
+                record.alert_delivered = delivered
+                record.delivery_error = delivery_error
+                await db.commit()
+
+            if not matched_any:
+                logger.info(
+                    "Rule %d fired for source %d but no report config has this rule linked",
+                    event["rule_id"], self.source_id,
+                )
