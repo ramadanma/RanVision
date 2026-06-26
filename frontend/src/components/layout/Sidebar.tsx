@@ -5,23 +5,27 @@ import {
   SettingOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import { Menu, Typography } from 'antd'
+import { Menu, Segmented, Typography } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import { useLangStore, type Lang } from '../../store/langStore'
 
 const { Title } = Typography
 
-const items = [
-  { key: '/sources', icon: <CameraOutlined />, label: '视频源' },
-  { key: '/faces', icon: <UserOutlined />, label: '人脸库' },
-  { key: '/records', icon: <AlertOutlined />, label: '触发记录' },
-  { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
-]
-
 export default function Sidebar() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const location = useLocation()
   const logout = useAuthStore((s) => s.logout)
+  const { lang, setLang } = useLangStore()
+
+  const items = [
+    { key: '/sources', icon: <CameraOutlined />, label: t('nav.sources') },
+    { key: '/faces', icon: <UserOutlined />, label: t('nav.faces') },
+    { key: '/records', icon: <AlertOutlined />, label: t('nav.records') },
+    { key: '/settings', icon: <SettingOutlined />, label: t('nav.settings') },
+  ]
 
   const selectedKey = items.find((i) => location.pathname.startsWith(i.key))?.key || '/sources'
 
@@ -38,10 +42,22 @@ export default function Sidebar() {
         onClick={({ key }) => navigate(key)}
         style={{ flex: 1, borderRight: 0 }}
       />
+      <div style={{ padding: '8px 12px', borderTop: '1px solid #303030' }}>
+        <Segmented
+          block
+          size="small"
+          options={[
+            { label: '中文', value: 'zh' },
+            { label: 'EN', value: 'en' },
+          ]}
+          value={lang}
+          onChange={(v) => setLang(v as Lang)}
+        />
+      </div>
       <Menu
         theme="dark"
         mode="inline"
-        items={[{ key: 'logout', icon: <LogoutOutlined />, label: '退出登录' }]}
+        items={[{ key: 'logout', icon: <LogoutOutlined />, label: t('nav.logout') }]}
         onClick={() => { logout(); navigate('/login') }}
         style={{ borderRight: 0 }}
       />

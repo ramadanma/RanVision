@@ -1,22 +1,7 @@
 import { Button, Checkbox, Form, Input, InputNumber, Select, message } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { createRule } from '../../api/rules'
 import type { Rule } from '../../api/types'
-
-const KEYPOINTS = [
-  { label: '鼻子', value: 0 },
-  { label: '左肩', value: 5 },
-  { label: '右肩', value: 6 },
-  { label: '左肘', value: 7 },
-  { label: '右肘', value: 8 },
-  { label: '左腕', value: 9 },
-  { label: '右腕', value: 10 },
-  { label: '左髋', value: 11 },
-  { label: '右髋', value: 12 },
-  { label: '左膝', value: 13 },
-  { label: '右膝', value: 14 },
-  { label: '左踝', value: 15 },
-  { label: '右踝', value: 16 },
-]
 
 interface Props {
   zoneId: number
@@ -25,7 +10,24 @@ interface Props {
 }
 
 export default function RuleFormDwell({ zoneId, onCreated, onClose }: Props) {
+  const { t } = useTranslation()
   const [form] = Form.useForm()
+
+  const KEYPOINTS = [
+    { label: t('rules.kp_nose'), value: 0 },
+    { label: t('rules.kp_left_shoulder'), value: 5 },
+    { label: t('rules.kp_right_shoulder'), value: 6 },
+    { label: t('rules.kp_left_elbow'), value: 7 },
+    { label: t('rules.kp_right_elbow'), value: 8 },
+    { label: t('rules.kp_left_wrist'), value: 9 },
+    { label: t('rules.kp_right_wrist'), value: 10 },
+    { label: t('rules.kp_left_hip'), value: 11 },
+    { label: t('rules.kp_right_hip'), value: 12 },
+    { label: t('rules.kp_left_knee'), value: 13 },
+    { label: t('rules.kp_right_knee'), value: 14 },
+    { label: t('rules.kp_left_ankle'), value: 15 },
+    { label: t('rules.kp_right_ankle'), value: 16 },
+  ]
 
   const handleFinish = async (values: {
     name: string
@@ -36,30 +38,30 @@ export default function RuleFormDwell({ zoneId, onCreated, onClose }: Props) {
     try {
       const res = await createRule({ ...values, zone_id: zoneId, rule_type: 'dwell_time' })
       onCreated(res.data)
-      message.success('规则已创建')
+      message.success(t('rules.created'))
       onClose()
     } catch {
-      message.error('创建失败')
+      message.error(t('rules.create_failed'))
     }
   }
 
   return (
     <Form form={form} layout="vertical" onFinish={handleFinish}>
-      <Form.Item name="name" label="规则名称" rules={[{ required: true }]}>
+      <Form.Item name="name" label={t('rules.name')} rules={[{ required: true }]}>
         <Input />
       </Form.Item>
-      <Form.Item name="keypoint_indices" label="检测关键点（可多选）" rules={[{ required: true }]}>
+      <Form.Item name="keypoint_indices" label={t('rules.keypoints')} rules={[{ required: true }]}>
         <Checkbox.Group options={KEYPOINTS} style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }} />
       </Form.Item>
-      <Form.Item label="时间条件" required style={{ marginBottom: 0 }}>
+      <Form.Item label={t('rules.time_cond')} required style={{ marginBottom: 0 }}>
         <Form.Item name="dwell_op" style={{ display: 'inline-block', width: 120 }} initialValue="gt">
-          <Select options={[{ label: '超过', value: 'gt' }, { label: '小于', value: 'lt' }]} />
+          <Select options={[{ label: t('rules.gt'), value: 'gt' }, { label: t('rules.lt'), value: 'lt' }]} />
         </Form.Item>
         <Form.Item name="dwell_seconds" style={{ display: 'inline-block', marginLeft: 8, width: 140 }} rules={[{ required: true }]}>
-          <InputNumber min={0.1} step={0.1} precision={1} addonAfter="秒" style={{ width: '100%' }} />
+          <InputNumber min={0.1} step={0.1} precision={1} addonAfter={t('rules.seconds')} style={{ width: '100%' }} />
         </Form.Item>
       </Form.Item>
-      <Button type="primary" htmlType="submit" block style={{ marginTop: 8 }}>创建规则</Button>
+      <Button type="primary" htmlType="submit" block style={{ marginTop: 8 }}>{t('rules.create')}</Button>
     </Form>
   )
 }

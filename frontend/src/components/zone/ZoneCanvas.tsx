@@ -1,5 +1,6 @@
 import { Button, Input, message, Space } from 'antd'
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createZone } from '../../api/zones'
 import type { Zone } from '../../api/types'
 
@@ -12,6 +13,7 @@ interface Props {
 const COLORS = ['#ff4d4f', '#52c41a', '#1677ff', '#faad14', '#722ed1']
 
 export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
+  const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [drawing, setDrawing] = useState(false)
@@ -21,9 +23,6 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null)
   const [snapshotLoading, setSnapshotLoading] = useState(false)
 
-  // Observe container resize — derive height from width (16:9) so that when the
-  // tab is hidden (display:none → width=0) the canvas size doesn't collapse to 0,
-  // which would make it invisible when the tab is shown again.
   useEffect(() => {
     const obs = new ResizeObserver((entries) => {
       const w = entries[0].contentRect.width
@@ -55,7 +54,7 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
 
   useEffect(() => {
     redraw()
-  }, [zones, points, canvasSize, bgImage])
+  }, [zones, points, canvasSize, bgImage, t])
 
   const redraw = () => {
     const canvas = canvasRef.current
@@ -63,7 +62,6 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
     const ctx = canvas.getContext('2d')!
     ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-    // Background: video frame or dark placeholder
     if (bgImage) {
       ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height)
     } else {
@@ -72,11 +70,10 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
       ctx.fillStyle = '#555'
       ctx.font = '14px sans-serif'
       ctx.textAlign = 'center'
-      ctx.fillText('启动视频源后可预览画面', canvas.width / 2, canvas.height / 2)
+      ctx.fillText(t('canvas.start_hint'), canvas.width / 2, canvas.height / 2)
       ctx.textAlign = 'left'
     }
 
-    // Draw saved zones
     zones.forEach((zone, i) => {
       const poly: number[][] = JSON.parse(zone.polygon_json)
       const color = COLORS[i % COLORS.length]
@@ -99,7 +96,6 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
       }
     })
 
-    // Draw in-progress polygon
     if (points.length > 0) {
       ctx.beginPath()
       ctx.strokeStyle = '#fff'
@@ -133,11 +129,11 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
 
   const handleSave = async () => {
     if (points.length < 4) {
-      message.warning('至少需要 4 个点')
+      message.warning(t('canvas.min_points'))
       return
     }
     if (!zoneName.trim()) {
-      message.warning('请输入区域名称')
+      message.warning(t('canvas.name_required'))
       return
     }
     const canvas = canvasRef.current!
@@ -151,9 +147,9 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
       setPoints([])
       setDrawing(false)
       setZoneName('')
-      message.success('区域已保存')
+      message.success(t('canvas.saved'))
     } catch {
-      message.error('保存失败')
+      message.error(t('canvas.save_failed'))
     }
   }
 
@@ -167,20 +163,22 @@ export default function ZoneCanvas({ sourceId, zones, onZoneCreated }: Props) {
       <Space style={{ marginBottom: 8 }}>
         {!drawing ? (
           <>
-            <Button type="primary" onClick={() => setDrawing(true)}>绘制新区域</Button>
-            <Button onClick={loadSnapshot} loading={snapshotLoading}>刷新预览</Button>
+            <Button type="primary" onClick={() => setDrawing(true)}>{t('canvas.draw_zone')}</Button>
+            <Button onClick={loadSnapshot} loading={snapshotLoading}>{t('canvas.refresh')}</Button>
           </>
         ) : (
           <>
             <Input
-              placeholder="区域名称"
+              placeholder={t('canvas.zone_name_placeholder')}
               value={zoneName}
               onChange={(e) => setZoneName(e.target.value)}
               style={{ width: 160 }}
             />
-            <Button onClick={handleSave} disabled={points.length < 4}>保存（{points.length} 点）</Button>
-            <Button onClick={handleCancel}>取消</Button>
-            <span style={{ color: '#888', fontSize: 12 }}>点击添加顶点，双击完成（至少 4 点）</span>
+            <Button onClick={handleSave} disabled={points.length < 4}>
+              {t('canvas.save_points', { n: points.length })}
+            </Button>
+            <Button onClick={handleCancel}>{t('canvas.cancel')}</Button>
+            <span style={{ color: '#888', fontSize: 12 }}>{t('canvas.draw_hint')}</span>
           </>
         )}
       </Space>

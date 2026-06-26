@@ -1,5 +1,6 @@
 import { DeleteOutlined, PlayCircleOutlined, StopOutlined } from '@ant-design/icons'
 import { Badge, Button, Card, Popconfirm, Space, Tag, Typography, message } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { deleteSource, startSource, stopSource } from '../../api/sources'
 import { useSourceStore } from '../../store/sourceStore'
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export default function SourceCard({ source }: Props) {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const { updateSource, removeSource } = useSourceStore()
 
@@ -19,9 +21,9 @@ export default function SourceCard({ source }: Props) {
     try {
       const res = await startSource(source.id)
       updateSource(res.data)
-      message.success('已启动')
+      message.success(t('source.started'))
     } catch {
-      message.error('启动失败')
+      message.error(t('source.start_failed'))
     }
   }
 
@@ -29,16 +31,16 @@ export default function SourceCard({ source }: Props) {
     try {
       const res = await stopSource(source.id)
       updateSource(res.data)
-      message.success('已停止')
+      message.success(t('source.stopped'))
     } catch {
-      message.error('停止失败')
+      message.error(t('source.stop_failed'))
     }
   }
 
   const handleDelete = async () => {
     await deleteSource(source.id)
     removeSource(source.id)
-    message.success('已删除')
+    message.success(t('source.deleted'))
   }
 
   return (
@@ -51,21 +53,21 @@ export default function SourceCard({ source }: Props) {
         </Space>
       }
       extra={
-        <Popconfirm title="确认删除？" onConfirm={handleDelete}>
+        <Popconfirm title={t('common.confirm_delete')} onConfirm={handleDelete}>
           <Button size="small" danger icon={<DeleteOutlined />} />
         </Popconfirm>
       }
       actions={[
         source.is_active ? (
-          <Button type="text" icon={<StopOutlined />} onClick={handleStop} danger>停止</Button>
+          <Button type="text" icon={<StopOutlined />} onClick={handleStop} danger>{t('source.btn_stop')}</Button>
         ) : (
-          <Button type="text" icon={<PlayCircleOutlined />} onClick={handleStart}>启动</Button>
+          <Button type="text" icon={<PlayCircleOutlined />} onClick={handleStart}>{t('source.btn_start')}</Button>
         ),
-        <Button type="link" onClick={() => navigate(`/sources/${source.id}`)}>配置</Button>,
+        <Button type="link" onClick={() => navigate(`/sources/${source.id}`)}>{t('source.btn_config')}</Button>,
       ]}
     >
       <Tag color={source.source_type === 'file' ? 'blue' : 'green'}>
-        {source.source_type === 'file' ? '视频文件' : 'IP摄像头'}
+        {source.source_type === 'file' ? t('source.type_file') : t('source.type_camera')}
       </Tag>
       {source.source_type === 'ip_camera' && (
         <Text type="secondary" style={{ fontSize: 12 }}>{source.ip}:{source.port}</Text>

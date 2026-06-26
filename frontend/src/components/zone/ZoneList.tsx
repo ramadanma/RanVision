@@ -1,6 +1,7 @@
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { Button, Collapse, Empty, List, Popconfirm, Space, Tag, Typography, message } from 'antd'
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { deleteZone } from '../../api/zones'
 import { listRules } from '../../api/rules'
 import type { Rule, Zone } from '../../api/types'
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export default function ZoneList({ zones, onZoneDeleted }: Props) {
+  const { t } = useTranslation()
   const [rulesMap, setRulesMap] = useState<Record<number, Rule[]>>({})
   const [addingRuleZoneId, setAddingRuleZoneId] = useState<number | null>(null)
 
@@ -27,22 +29,22 @@ export default function ZoneList({ zones, onZoneDeleted }: Props) {
   const handleDeleteZone = async (id: number) => {
     await deleteZone(id)
     onZoneDeleted(id)
-    message.success('区域已删除')
+    message.success(t('zones.deleted'))
   }
 
   const handleRuleAdded = (zoneId: number, rule: Rule) => {
     setRulesMap((prev) => ({ ...prev, [zoneId]: [...(prev[zoneId] || []), rule] }))
   }
 
-  if (zones.length === 0) return <Empty description="暂无检测区域" />
+  if (zones.length === 0) return <Empty description={t('zones.empty')} />
 
   const items = zones.map((zone) => ({
     key: zone.id,
     label: (
       <Space>
         <Text strong>{zone.name}</Text>
-        <Tag>{JSON.parse(zone.polygon_json).length} 点</Tag>
-        <Popconfirm title="确认删除该区域？" onConfirm={() => handleDeleteZone(zone.id)}>
+        <Tag>{JSON.parse(zone.polygon_json).length} {t('zones.points')}</Tag>
+        <Popconfirm title={t('zones.confirm_delete')} onConfirm={() => handleDeleteZone(zone.id)}>
           <Button size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
         </Popconfirm>
       </Space>
@@ -55,13 +57,13 @@ export default function ZoneList({ zones, onZoneDeleted }: Props) {
           renderItem={(rule) => (
             <List.Item>
               <Space>
-                <Tag color={rule.is_enabled ? 'green' : 'default'}>{rule.is_enabled ? '启用' : '禁用'}</Tag>
-                <Tag color="blue">{rule.rule_type === 'dwell_time' ? '停留时间' : '肢体角度'}</Tag>
+                <Tag color={rule.is_enabled ? 'green' : 'default'}>{rule.is_enabled ? t('zones.enabled') : t('zones.disabled')}</Tag>
+                <Tag color="blue">{rule.rule_type === 'dwell_time' ? t('zones.rule_dwell') : t('zones.rule_limb')}</Tag>
                 <Text>{rule.name}</Text>
               </Space>
             </List.Item>
           )}
-          locale={{ emptyText: '暂无规则' }}
+          locale={{ emptyText: t('zones.no_rules') }}
         />
         <Button
           size="small"
@@ -69,7 +71,7 @@ export default function ZoneList({ zones, onZoneDeleted }: Props) {
           style={{ marginTop: 8 }}
           onClick={() => setAddingRuleZoneId(zone.id)}
         >
-          添加规则
+          {t('zones.add_rule')}
         </Button>
       </div>
     ),

@@ -5,6 +5,7 @@ import {
 } from 'antd'
 import type { TextAreaRef } from 'antd/es/input/TextArea'
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   addTriggerRule, createReportConfig, deleteReportConfig,
   listReportConfigs, removeTriggerRule, updateReportConfig
@@ -14,16 +15,6 @@ import type { ReportConfig, Rule, Zone } from '../api/types'
 
 const { Text } = Typography
 
-// Variables that can be inserted into subject/body templates
-const TEMPLATE_VARS = [
-  { key: '{{person_name}}', label: '人员姓名' },
-  { key: '{{source_id}}', label: '视频源ID' },
-  { key: '{{zone_id}}', label: '区域ID' },
-  { key: '{{rule_id}}', label: '规则ID' },
-  { key: '{{triggered_at}}', label: '触发时间' },
-  { key: '{{details}}', label: '规则详情' },
-]
-
 interface VarButtonsProps {
   textAreaRef: React.RefObject<TextAreaRef>
   formInstance: ReturnType<typeof Form.useForm>[0]
@@ -31,6 +22,17 @@ interface VarButtonsProps {
 }
 
 function VarButtons({ textAreaRef, formInstance, fieldName }: VarButtonsProps) {
+  const { t } = useTranslation()
+
+  const TEMPLATE_VARS = [
+    { key: '{{person_name}}', label: t('report.var_person') },
+    { key: '{{source_id}}', label: t('report.var_source') },
+    { key: '{{zone_id}}', label: t('report.var_zone') },
+    { key: '{{rule_id}}', label: t('report.var_rule') },
+    { key: '{{triggered_at}}', label: t('report.var_time') },
+    { key: '{{details}}', label: t('report.var_details') },
+  ]
+
   const insert = (variable: string) => {
     const el = textAreaRef.current?.resizableTextArea?.textArea
     const current: string = formInstance.getFieldValue(fieldName) || ''
@@ -50,7 +52,7 @@ function VarButtons({ textAreaRef, formInstance, fieldName }: VarButtonsProps) {
 
   return (
     <Space size={4} wrap style={{ marginBottom: 4 }}>
-      <Text type="secondary" style={{ fontSize: 12 }}>插入变量：</Text>
+      <Text type="secondary" style={{ fontSize: 12 }}>{t('report.insert_var')}</Text>
       {TEMPLATE_VARS.map((v) => (
         <Tooltip key={v.key} title={v.key}>
           <Button size="small" onClick={() => insert(v.key)}>{v.label}</Button>
@@ -65,20 +67,19 @@ interface TemplateFieldsProps {
 }
 
 function TemplateFields({ formInstance }: TemplateFieldsProps) {
+  const { t } = useTranslation()
   const subjectRef = useRef<TextAreaRef>(null)
   const bodyRef = useRef<TextAreaRef>(null)
 
   return (
     <>
-      {/* Outer Form.Item provides label only; inner noStyle Form.Item owns the form binding.
-          Putting VarButtons and TextArea in the same Form.Item breaks value binding in Ant Design 5. */}
-      <Form.Item label="邮件主题模板（留空使用默认）">
+      <Form.Item label={t('report.subject_tmpl')}>
         <VarButtons textAreaRef={subjectRef} formInstance={formInstance} fieldName="subject_template" />
         <Form.Item name="subject_template" noStyle>
-          <Input.TextArea ref={subjectRef} rows={2} placeholder="[RanVision] 规则触发: #{{rule_id}}" />
+          <Input.TextArea ref={subjectRef} rows={2} placeholder="[RanVision] #{{rule_id}}" />
         </Form.Item>
       </Form.Item>
-      <Form.Item label="邮件正文模板（留空使用默认）">
+      <Form.Item label={t('report.body_tmpl')}>
         <VarButtons textAreaRef={bodyRef} formInstance={formInstance} fieldName="body_template" />
         <Form.Item name="body_template" noStyle>
           <Input.TextArea
@@ -98,6 +99,7 @@ interface Props {
 }
 
 export default function ReportConfigPanel({ sourceId, zones }: Props) {
+  const { t } = useTranslation()
   const [configs, setConfigs] = useState<ReportConfig[]>([])
   const [allRules, setAllRules] = useState<Rule[]>([])
   const [showForm, setShowForm] = useState(false)
@@ -119,9 +121,9 @@ export default function ReportConfigPanel({ sourceId, zones }: Props) {
       setConfigs((prev) => [...prev, res.data])
       setShowForm(false)
       form.resetFields()
-      message.success('报告配置已创建')
+      message.success(t('report.created'))
     } catch {
-      message.error('创建失败，请检查填写内容')
+      message.error(t('report.create_failed'))
     }
   }
 
@@ -147,9 +149,9 @@ export default function ReportConfigPanel({ sourceId, zones }: Props) {
       setConfigs((prev) => prev.map((c) => (c.id === editingId ? res.data : c)))
       setEditingId(null)
       editForm.resetFields()
-      message.success('报告配置已更新')
+      message.success(t('report.updated'))
     } catch {
-      message.error('更新失败，请检查填写内容')
+      message.error(t('report.update_failed'))
     }
   }
 
@@ -178,26 +180,26 @@ export default function ReportConfigPanel({ sourceId, zones }: Props) {
 
   const commonFormFields = (formInstance: ReturnType<typeof Form.useForm>[0]) => (
     <>
-      <Form.Item name="name" label="配置名称" rules={[{ required: true }]}>
+      <Form.Item name="name" label={t('report.name')} rules={[{ required: true }]}>
         <Input />
       </Form.Item>
-      <Form.Item name="delivery_method" label="发送方式">
+      <Form.Item name="delivery_method" label={t('report.method')}>
         <Radio.Group>
-          <Radio value="email">邮件</Radio>
-          <Radio value="webhook">HTTP Webhook</Radio>
+          <Radio value="email">{t('report.email')}</Radio>
+          <Radio value="webhook">{t('report.webhook')}</Radio>
         </Radio.Group>
       </Form.Item>
-      <Form.Item name="destination" label="目标地址（邮箱或URL）" rules={[{ required: true }]}>
+      <Form.Item name="destination" label={t('report.destination')} rules={[{ required: true }]}>
         <Input />
       </Form.Item>
-      <Form.Item name="photo_count" label="附带照片数量（0=不附带）">
+      <Form.Item name="photo_count" label={t('report.photo_count')}>
         <InputNumber min={0} max={10} />
       </Form.Item>
       <Form.Item name="include_person_name" valuePropName="checked">
-        <Checkbox>包含人员姓名（需开启人脸识别）</Checkbox>
+        <Checkbox>{t('report.include_name')}</Checkbox>
       </Form.Item>
       <Form.Item name="save_records" valuePropName="checked">
-        <Checkbox>保存触发记录</Checkbox>
+        <Checkbox>{t('report.save_records')}</Checkbox>
       </Form.Item>
       <TemplateFields formInstance={formInstance} />
     </>
@@ -207,7 +209,7 @@ export default function ReportConfigPanel({ sourceId, zones }: Props) {
     <div>
       <Space style={{ marginBottom: 16 }}>
         <Button icon={<PlusOutlined />} type="primary" onClick={() => { setShowForm(!showForm); setEditingId(null) }}>
-          新增报告配置
+          {t('report.add')}
         </Button>
       </Space>
 
@@ -221,8 +223,8 @@ export default function ReportConfigPanel({ sourceId, zones }: Props) {
           >
             {commonFormFields(form)}
             <Space>
-              <Button type="primary" htmlType="submit">创建</Button>
-              <Button onClick={() => { setShowForm(false); form.resetFields() }}>取消</Button>
+              <Button type="primary" htmlType="submit">{t('report.btn_create')}</Button>
+              <Button onClick={() => { setShowForm(false); form.resetFields() }}>{t('report.btn_cancel')}</Button>
             </Space>
           </Form>
         </Card>
@@ -239,7 +241,7 @@ export default function ReportConfigPanel({ sourceId, zones }: Props) {
                 icon={<EditOutlined />}
                 onClick={() => { setShowForm(false); handleEdit(config) }}
               />
-              <Popconfirm title="确认删除？" onConfirm={() => handleDelete(config.id)}>
+              <Popconfirm title={t('report.confirm_delete')} onConfirm={() => handleDelete(config.id)}>
                 <Button size="small" danger icon={<DeleteOutlined />} />
               </Popconfirm>
             </Space>
@@ -250,34 +252,37 @@ export default function ReportConfigPanel({ sourceId, zones }: Props) {
             <Form form={editForm} layout="vertical" onFinish={handleUpdate} style={{ marginBottom: 8 }}>
               {commonFormFields(editForm)}
               <Space>
-                <Button type="primary" htmlType="submit">保存</Button>
-                <Button onClick={() => { setEditingId(null); editForm.resetFields() }}>取消</Button>
+                <Button type="primary" htmlType="submit">{t('report.btn_save')}</Button>
+                <Button onClick={() => { setEditingId(null); editForm.resetFields() }}>{t('report.btn_cancel')}</Button>
               </Space>
             </Form>
           ) : (
             <Space direction="vertical" style={{ width: '100%' }}>
               <Space>
                 <Tag color={config.delivery_method === 'email' ? 'blue' : 'purple'}>
-                  {config.delivery_method === 'email' ? '邮件' : 'Webhook'}
+                  {config.delivery_method === 'email' ? t('report.email') : t('report.webhook')}
                 </Tag>
                 <Text type="secondary">{config.destination}</Text>
               </Space>
               <Text type="secondary">
-                附带 {config.photo_count} 张照片，{config.include_person_name ? '含' : '不含'}姓名
+                {t('report.photos_info', {
+                  count: config.photo_count,
+                  include: config.include_person_name ? t('report.name_include') : t('report.name_exclude'),
+                })}
               </Text>
               {config.subject_template && (
-                <Text type="secondary" style={{ fontSize: 12 }}>主题：{config.subject_template}</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>{t('report.subject_label')}{config.subject_template}</Text>
               )}
               {config.body_template && (
                 <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
-                  正文：{config.body_template.slice(0, 80)}{config.body_template.length > 80 ? '…' : ''}
+                  {t('report.body_label')}{config.body_template.slice(0, 80)}{config.body_template.length > 80 ? '…' : ''}
                 </Text>
               )}
               <div>
-                <Text strong>触发规则：</Text>
+                <Text strong>{t('report.trigger_rules')}</Text>
                 <div style={{ marginTop: 4 }}>
                   {allRules.length === 0 ? (
-                    <Text type="secondary">暂无规则（请先在「检测区域」中创建规则）</Text>
+                    <Text type="secondary">{t('report.no_rules')}</Text>
                   ) : (
                     allRules.map((rule) => (
                       <Checkbox

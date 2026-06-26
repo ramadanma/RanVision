@@ -1,4 +1,5 @@
 import { Button, Form, Input, InputNumber, Radio, Select, message } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { createRule } from '../../api/rules'
 import type { Rule } from '../../api/types'
 
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function RuleFormAngle({ zoneId, onCreated, onClose }: Props) {
+  const { t } = useTranslation()
   const [form] = Form.useForm()
 
   const handleFinish = async (values: {
@@ -20,36 +22,36 @@ export default function RuleFormAngle({ zoneId, onCreated, onClose }: Props) {
     try {
       const res = await createRule({ ...values, zone_id: zoneId, rule_type: 'limb_angle' })
       onCreated(res.data)
-      message.success('规则已创建')
+      message.success(t('rules.created'))
       onClose()
     } catch {
-      message.error('创建失败')
+      message.error(t('rules.create_failed'))
     }
   }
 
   return (
     <Form form={form} layout="vertical" onFinish={handleFinish}>
-      <Form.Item name="name" label="规则名称" rules={[{ required: true }]}>
+      <Form.Item name="name" label={t('rules.name')} rules={[{ required: true }]}>
         <Input />
       </Form.Item>
-      <Form.Item name="arm_side" label="手臂侧别" rules={[{ required: true }]} initialValue="both">
+      <Form.Item name="arm_side" label={t('rules.arm_side')} rules={[{ required: true }]} initialValue="both">
         <Radio.Group
           options={[
-            { label: '左臂', value: 'left' },
-            { label: '右臂', value: 'right' },
-            { label: '双臂', value: 'both' },
+            { label: t('rules.left'), value: 'left' },
+            { label: t('rules.right'), value: 'right' },
+            { label: t('rules.both'), value: 'both' },
           ]}
         />
       </Form.Item>
-      <Form.Item label="角度条件" required style={{ marginBottom: 0 }}>
+      <Form.Item label={t('rules.angle_cond')} required style={{ marginBottom: 0 }}>
         <Form.Item name="angle_op" style={{ display: 'inline-block', width: 120 }} initialValue="gt">
-          <Select options={[{ label: '超过', value: 'gt' }, { label: '小于', value: 'lt' }]} />
+          <Select options={[{ label: t('rules.gt'), value: 'gt' }, { label: t('rules.lt'), value: 'lt' }]} />
         </Form.Item>
         <Form.Item name="angle_degrees" style={{ display: 'inline-block', marginLeft: 8, width: 140 }} rules={[{ required: true }]}>
-          <InputNumber min={0} max={180} step={1} addonAfter="度" style={{ width: '100%' }} />
+          <InputNumber min={0} max={180} step={1} addonAfter={t('rules.degrees')} style={{ width: '100%' }} />
         </Form.Item>
       </Form.Item>
-      <Button type="primary" htmlType="submit" block style={{ marginTop: 8 }}>创建规则</Button>
+      <Button type="primary" htmlType="submit" block style={{ marginTop: 8 }}>{t('rules.create')}</Button>
     </Form>
   )
 }

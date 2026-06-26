@@ -1,5 +1,6 @@
 import { Button, Space, message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { updateDetectionRoi } from '../../api/sources'
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function RoiCanvas({ sourceId, roiJson, onRoiUpdated }: Props) {
+  const { t } = useTranslation()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [drawing, setDrawing] = useState(false)
@@ -47,7 +49,7 @@ export default function RoiCanvas({ sourceId, roiJson, onRoiUpdated }: Props) {
 
   useEffect(() => { loadSnapshot() }, [sourceId])
 
-  useEffect(() => { redraw() }, [points, canvasSize, bgImage, roiJson])
+  useEffect(() => { redraw() }, [points, canvasSize, bgImage, roiJson, t])
 
   const redraw = () => {
     const canvas = canvasRef.current
@@ -63,11 +65,10 @@ export default function RoiCanvas({ sourceId, roiJson, onRoiUpdated }: Props) {
       ctx.fillStyle = '#555'
       ctx.font = '14px sans-serif'
       ctx.textAlign = 'center'
-      ctx.fillText('启动视频源后可预览画面', canvas.width / 2, canvas.height / 2)
+      ctx.fillText(t('canvas.start_hint'), canvas.width / 2, canvas.height / 2)
       ctx.textAlign = 'left'
     }
 
-    // Draw saved ROI
     if (roiJson && points.length === 0) {
       try {
         const poly: number[][] = JSON.parse(roiJson)
@@ -83,11 +84,10 @@ export default function RoiCanvas({ sourceId, roiJson, onRoiUpdated }: Props) {
         ctx.stroke()
         ctx.fillStyle = '#ffa500'
         ctx.font = '13px sans-serif'
-        ctx.fillText('侦测ROI', poly[0][0] * canvas.width + 4, poly[0][1] * canvas.height - 4)
+        ctx.fillText(t('roi.label'), poly[0][0] * canvas.width + 4, poly[0][1] * canvas.height - 4)
       } catch { /* ignore bad JSON */ }
     }
 
-    // Draw in-progress polygon
     if (points.length > 0) {
       ctx.beginPath()
       ctx.strokeStyle = '#ffa500'
@@ -121,7 +121,7 @@ export default function RoiCanvas({ sourceId, roiJson, onRoiUpdated }: Props) {
 
   const handleSave = async () => {
     if (points.length < 3) {
-      message.warning('至少需要 3 个点')
+      message.warning(t('roi.min_points'))
       return
     }
     const canvas = canvasRef.current!
@@ -136,9 +136,9 @@ export default function RoiCanvas({ sourceId, roiJson, onRoiUpdated }: Props) {
       onRoiUpdated(roi_json)
       setPoints([])
       setDrawing(false)
-      message.success('ROI 已保存')
+      message.success(t('roi.saved'))
     } catch {
-      message.error('保存失败')
+      message.error(t('roi.save_failed'))
     } finally {
       setSaving(false)
     }
@@ -151,9 +151,9 @@ export default function RoiCanvas({ sourceId, roiJson, onRoiUpdated }: Props) {
       onRoiUpdated(null)
       setPoints([])
       setDrawing(false)
-      message.success('ROI 已清除')
+      message.success(t('roi.cleared'))
     } catch {
-      message.error('清除失败')
+      message.error(t('roi.clear_failed'))
     } finally {
       setSaving(false)
     }
@@ -169,24 +169,24 @@ export default function RoiCanvas({ sourceId, roiJson, onRoiUpdated }: Props) {
       <Space style={{ marginBottom: 8 }}>
         {!drawing ? (
           <>
-            <Button type="primary" onClick={() => setDrawing(true)}>绘制 ROI</Button>
+            <Button type="primary" onClick={() => setDrawing(true)}>{t('roi.draw')}</Button>
             {roiJson && (
-              <Button danger onClick={handleClear} loading={saving}>清除 ROI</Button>
+              <Button danger onClick={handleClear} loading={saving}>{t('roi.clear')}</Button>
             )}
-            <Button onClick={loadSnapshot} loading={snapshotLoading}>刷新预览</Button>
+            <Button onClick={loadSnapshot} loading={snapshotLoading}>{t('roi.refresh')}</Button>
           </>
         ) : (
           <>
             <Button type="primary" onClick={handleSave} disabled={points.length < 3} loading={saving}>
-              保存（{points.length} 点）
+              {t('roi.save_points', { n: points.length })}
             </Button>
-            <Button onClick={handleCancel}>取消</Button>
-            <span style={{ color: '#888', fontSize: 12 }}>点击添加顶点，双击完成（至少 3 点）</span>
+            <Button onClick={handleCancel}>{t('roi.cancel')}</Button>
+            <span style={{ color: '#888', fontSize: 12 }}>{t('roi.draw_hint')}</span>
           </>
         )}
       </Space>
       <div style={{ color: '#888', fontSize: 12, marginBottom: 6 }}>
-        侦测ROI 限定 YOLO 检测范围（框外的人不会触发规则），留空则全画面检测
+        {t('roi.hint')}
       </div>
       <div ref={containerRef} style={{ lineHeight: 0, width: '100%', minHeight: 360 }}>
         <canvas

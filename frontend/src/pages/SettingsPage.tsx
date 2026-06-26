@@ -1,10 +1,12 @@
 import { Button, Card, Checkbox, Form, Input, InputNumber, Spin, Typography, message } from 'antd'
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getSmtpConfig, updateSmtpConfig } from '../api/smtpConfig'
 
 const { Title } = Typography
 
 export default function SettingsPage() {
+  const { t } = useTranslation()
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -44,7 +46,7 @@ export default function SettingsPage() {
         payload.password = values.password
       }
       await updateSmtpConfig(payload)
-      message.success('SMTP 配置已保存')
+      message.success(t('settings.saved'))
       form.setFieldValue('password', '')
     } finally {
       setSaving(false)
@@ -55,29 +57,29 @@ export default function SettingsPage() {
 
   return (
     <div style={{ maxWidth: 560 }}>
-      <Title level={4} style={{ marginBottom: 24 }}>系统设置</Title>
-      <Card title="邮件服务器（SMTP）配置">
+      <Title level={4} style={{ marginBottom: 24 }}>{t('settings.title')}</Title>
+      <Card title={t('settings.smtp_card')}>
         <Form form={form} layout="vertical" onFinish={handleSave}>
-          <Form.Item name="host" label="SMTP 服务器地址" rules={[{ required: true, message: '请填写 SMTP 服务器地址' }]}>
+          <Form.Item name="host" label={t('settings.smtp_host')} rules={[{ required: true, message: t('settings.smtp_host') }]}>
             <Input placeholder="smtp.example.com" />
           </Form.Item>
-          <Form.Item name="port" label="端口">
+          <Form.Item name="port" label={t('settings.port')}>
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="username" label="用户名（邮箱账号）">
+          <Form.Item name="username" label={t('settings.username')}>
             <Input placeholder="your@email.com" />
           </Form.Item>
-          <Form.Item name="password" label="授权码 / 密码（留空则不修改）">
-            <Input.Password placeholder="填写则更新，留空保持原值" autoComplete="new-password" />
+          <Form.Item name="password" label={t('settings.password')}>
+            <Input.Password placeholder={t('settings.password_placeholder')} autoComplete="new-password" />
           </Form.Item>
-          <Form.Item name="from_addr" label="发件人地址（From，留空则使用用户名）">
+          <Form.Item name="from_addr" label={t('settings.from_addr')}>
             <Input placeholder="RanVision <noreply@example.com>" />
           </Form.Item>
           <Form.Item name="use_tls" valuePropName="checked">
-            <Checkbox>启用 STARTTLS 加密</Checkbox>
+            <Checkbox>{t('settings.use_tls')}</Checkbox>
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={saving}>
-            保存配置
+            {t('settings.save')}
           </Button>
         </Form>
       </Card>

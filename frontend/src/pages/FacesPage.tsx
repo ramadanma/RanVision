@@ -4,6 +4,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import client from '../api/client'
 import { deleteFace, listFaces, reextractFace, uploadFace } from '../api/faces'
 import type { Face } from '../api/types'
@@ -29,6 +30,7 @@ function FacePhoto({ faceId }: { faceId: number }) {
 const { Title } = Typography
 
 export default function FacesPage() {
+  const { t, i18n } = useTranslation()
   const [faces, setFaces] = useState<Face[]>([])
   const [loading, setLoading] = useState(true)
   const [showUpload, setShowUpload] = useState(false)
@@ -53,16 +55,16 @@ export default function FacesPage() {
     try {
       const res = await reextractFace(id)
       setFaces((prev) => prev.map((f) => (f.id === id ? res.data : f)))
-      message.success('人脸特征提取成功')
+      message.success(t('faces.reextract_ok'))
     } catch {
-      message.error('未检测到人脸，请换一张清晰的正脸照片')
+      message.error(t('faces.reextract_fail'))
     } finally {
       setReextracting(null)
     }
   }
 
   const handleUpload = async (values: { person_name: string }) => {
-    if (!pendingFile) { message.warning('请先选择图片'); return }
+    if (!pendingFile) { message.warning(t('faces.select_image')); return }
     setUploading(true)
     try {
       const res = await uploadFace(values.person_name, pendingFile)
@@ -70,48 +72,50 @@ export default function FacesPage() {
       setShowUpload(false)
       form.resetFields()
       setPendingFile(null)
-      message.success('上传成功')
+      message.success(t('faces.upload_ok'))
     } catch {
-      message.error('上传失败')
+      message.error(t('faces.upload_fail'))
     } finally {
       setUploading(false)
     }
   }
 
+  const locale = i18n.language === 'zh' ? 'zh-CN' : 'en-US'
+
   const columns: ColumnsType<Face> = [
-    { title: 'ID', dataIndex: 'id', width: 60 },
+    { title: t('common.id'), dataIndex: 'id', width: 60 },
     {
-      title: '照片',
+      title: t('faces.col_photo'),
       dataIndex: 'id',
       width: 72,
       render: (id: number) => <FacePhoto faceId={id} />,
     },
-    { title: '人员姓名', dataIndex: 'person_name' },
+    { title: t('faces.col_name'), dataIndex: 'person_name' },
     {
-      title: '特征状态',
+      title: t('faces.col_status'),
       dataIndex: 'embedding_path',
       width: 120,
       render: (v: string | null) =>
         v ? (
-          <Tag color="green">已提取</Tag>
+          <Tag color="green">{t('faces.extracted')}</Tag>
         ) : (
-          <Tooltip title="人脸特征未提取，识别将不生效。请点击重新提取，或换一张清晰正脸照重新上传。">
-            <Tag color="red" style={{ cursor: 'help' }}>未提取</Tag>
+          <Tooltip title={t('faces.not_extracted_tip')}>
+            <Tag color="red" style={{ cursor: 'help' }}>{t('faces.not_extracted')}</Tag>
           </Tooltip>
         ),
     },
     {
-      title: '上传时间',
+      title: t('faces.col_created'),
       dataIndex: 'created_at',
-      render: (v: string) => new Date(v).toLocaleString('zh-CN'),
+      render: (v: string) => new Date(v).toLocaleString(locale),
     },
     {
-      title: '操作',
+      title: t('faces.col_actions'),
       width: 120,
       render: (_, record) => (
         <div style={{ display: 'flex', gap: 8 }}>
           {!record.embedding_path && (
-            <Tooltip title="重新提取人脸特征">
+            <Tooltip title={t('faces.reextract_tip')}>
               <Button
                 size="small"
                 icon={<ReloadOutlined />}
@@ -120,7 +124,7 @@ export default function FacesPage() {
               />
             </Tooltip>
           )}
-          <Popconfirm title="确认删除该人脸？" onConfirm={() => handleDelete(record.id)}>
+          <Popconfirm title={t('faces.confirm_delete')} onConfirm={() => handleDelete(record.id)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </div>
@@ -131,8 +135,8 @@ export default function FacesPage() {
   return (
     <div>
       <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
-        <Col><Title level={4} style={{ margin: 0 }}>人脸库</Title></Col>
-        <Col><Button type="primary" onClick={() => setShowUpload(true)}>上传人脸</Button></Col>
+        <Col><Title level={4} style={{ margin: 0 }}>{t('faces.title')}</Title></Col>
+        <Col><Button type="primary" onClick={() => setShowUpload(true)}>{t('faces.upload')}</Button></Col>
       </Row>
 
       <Table
@@ -143,9 +147,9 @@ export default function FacesPage() {
         pagination={{ pageSize: 20 }}
       />
 
-      <Modal title="上传人脸照片" open={showUpload} onCancel={() => setShowUpload(false)} footer={null}>
+      <Modal title={t('faces.modal_title')} open={showUpload} onCancel={() => setShowUpload(false)} footer={null}>
         <Form form={form} layout="vertical" onFinish={handleUpload}>
-          <Form.Item name="person_name" label="人员姓名" rules={[{ required: true }]}>
+          <Form.Item name="person_name" label={t('faces.col_name')} rules={[{ required: true }]}>
             <Input />
           </Form.Item>
           <Upload.Dragger
@@ -155,10 +159,10 @@ export default function FacesPage() {
             maxCount={1}
           >
             <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-            <p>点击或拖拽上传人脸照片</p>
+            <p>{t('faces.upload_hint')}</p>
           </Upload.Dragger>
           <Button type="primary" htmlType="submit" block style={{ marginTop: 12 }} loading={uploading}>
-            上传
+            {t('faces.btn_upload')}
           </Button>
         </Form>
       </Modal>
