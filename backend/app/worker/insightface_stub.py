@@ -96,7 +96,7 @@ def _stable_identity(track_id: int, name: str, conf: float) -> str:
     return max(avg, key=avg.get)
 
 
-def _is_front_facing(kps: list) -> bool:
+def is_front_facing(kps: list) -> bool:
     """
     Three-tier front-facing check (ported from demo.py _is_front_facing).
 
@@ -115,6 +115,17 @@ def _is_front_facing(kps: list) -> bool:
     if left_ear[2] > CONF and right_ear[2] > CONF:
         return False
     return True
+
+
+def clear_track_history(track_ids: set[int]) -> None:
+    """Remove stale identity history for tracks that have left the scene.
+
+    Must be called whenever a track disappears so that if the same ID is
+    recycled (e.g. after tracker reset), old history does not corrupt the
+    new track's recognition.
+    """
+    for tid in track_ids:
+        _identity_history.pop(tid, None)
 
 
 def extract_embedding(image: np.ndarray) -> np.ndarray | None:
@@ -160,7 +171,7 @@ def identify(
             track_id = det["track_id"]
             kps = det.get("keypoints", [])
 
-            if check_front_facing and not _is_front_facing(kps):
+            if check_front_facing and not is_front_facing(kps):
                 logger.debug("Track %d skipped: confirmed back-facing", track_id)
                 continue
 

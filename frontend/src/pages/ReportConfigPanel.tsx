@@ -70,17 +70,23 @@ function TemplateFields({ formInstance }: TemplateFieldsProps) {
 
   return (
     <>
-      <Form.Item name="subject_template" label="邮件主题模板（留空使用默认）">
+      {/* Outer Form.Item provides label only; inner noStyle Form.Item owns the form binding.
+          Putting VarButtons and TextArea in the same Form.Item breaks value binding in Ant Design 5. */}
+      <Form.Item label="邮件主题模板（留空使用默认）">
         <VarButtons textAreaRef={subjectRef} formInstance={formInstance} fieldName="subject_template" />
-        <Input.TextArea ref={subjectRef} rows={2} placeholder="[RanVision] 规则触发: #{{rule_id}}" />
+        <Form.Item name="subject_template" noStyle>
+          <Input.TextArea ref={subjectRef} rows={2} placeholder="[RanVision] 规则触发: #{{rule_id}}" />
+        </Form.Item>
       </Form.Item>
-      <Form.Item name="body_template" label="邮件正文模板（留空使用默认）">
+      <Form.Item label="邮件正文模板（留空使用默认）">
         <VarButtons textAreaRef={bodyRef} formInstance={formInstance} fieldName="body_template" />
-        <Input.TextArea
-          ref={bodyRef}
-          rows={5}
-          placeholder={`Source: {{source_id}}\nZone: {{zone_id}}\nRule: {{rule_id}}\nPerson: {{person_name}}\nDetails: {{details}}`}
-        />
+        <Form.Item name="body_template" noStyle>
+          <Input.TextArea
+            ref={bodyRef}
+            rows={5}
+            placeholder={`Source: {{source_id}}\nZone: {{zone_id}}\nRule: {{rule_id}}\nPerson: {{person_name}}\nDetails: {{details}}`}
+          />
+        </Form.Item>
       </Form.Item>
     </>
   )
@@ -106,12 +112,17 @@ export default function ReportConfigPanel({ sourceId, zones }: Props) {
     })
   }, [sourceId, zones.length])
 
-  const handleCreate = async (values: object) => {
-    const res = await createReportConfig({ ...values, source_id: sourceId })
-    setConfigs((prev) => [...prev, res.data])
-    setShowForm(false)
-    form.resetFields()
-    message.success('报告配置已创建')
+  const handleCreate = async (values: Record<string, unknown>) => {
+    try {
+      const data = { ...values, source_id: sourceId, photo_count: (values.photo_count as number) ?? 0 }
+      const res = await createReportConfig(data)
+      setConfigs((prev) => [...prev, res.data])
+      setShowForm(false)
+      form.resetFields()
+      message.success('报告配置已创建')
+    } catch {
+      message.error('创建失败，请检查填写内容')
+    }
   }
 
   const handleEdit = (config: ReportConfig) => {
@@ -128,13 +139,18 @@ export default function ReportConfigPanel({ sourceId, zones }: Props) {
     })
   }
 
-  const handleUpdate = async (values: object) => {
+  const handleUpdate = async (values: Record<string, unknown>) => {
     if (editingId === null) return
-    const res = await updateReportConfig(editingId, values)
-    setConfigs((prev) => prev.map((c) => (c.id === editingId ? res.data : c)))
-    setEditingId(null)
-    editForm.resetFields()
-    message.success('报告配置已更新')
+    try {
+      const data = { ...values, photo_count: (values.photo_count as number) ?? 0 }
+      const res = await updateReportConfig(editingId, data)
+      setConfigs((prev) => prev.map((c) => (c.id === editingId ? res.data : c)))
+      setEditingId(null)
+      editForm.resetFields()
+      message.success('报告配置已更新')
+    } catch {
+      message.error('更新失败，请检查填写内容')
+    }
   }
 
   const handleDelete = async (id: number) => {

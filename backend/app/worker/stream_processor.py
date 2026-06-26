@@ -403,6 +403,7 @@ class StreamProcessor(threading.Thread):
                 gone_ids = self._active_track_ids - current_ids
                 if gone_ids:
                     self._delete_photo_keys(gone_ids)
+                    insightface_stub.clear_track_history(gone_ids)
                 self._active_track_ids = current_ids
 
                 if frame_count % 150 == 0:
@@ -413,10 +414,20 @@ class StreamProcessor(threading.Thread):
 
                 self._cache_photos(frame, detections)
 
+                # When face_check_front is enabled, only evaluate rules for persons
+                # confirmed front-facing — back-facing persons do not trigger reports.
+                if self._face_check_front:
+                    rule_detections = [
+                        d for d in detections
+                        if insightface_stub.is_front_facing(d.get("keypoints", []))
+                    ]
+                else:
+                    rule_detections = detections
+
                 rule_engine.evaluate(
                     frame=frame,
                     zones=self._zones,
-                    detections=detections,
+                    detections=rule_detections,
                     identities=identities,
                     source_id=self.source_id,
                     on_trigger_callback=self._on_trigger,
