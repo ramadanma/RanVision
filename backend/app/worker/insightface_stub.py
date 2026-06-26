@@ -1,8 +1,12 @@
 """InsightFace face recognition. Singleton app, GPU-aware."""
 import logging
 import threading
+import warnings
 
 import numpy as np
+
+# Suppress FutureWarnings from insightface internals (lstsq rcond, SimilarityTransform)
+warnings.filterwarnings("ignore", category=FutureWarning, module="insightface")
 
 logger = logging.getLogger(__name__)
 
