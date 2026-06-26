@@ -54,6 +54,28 @@ async def get_face_photo(
     return FileResponse(face.photo_path)
 
 
+@router.post("/{face_id}/reextract", response_model=FaceOut)
+async def reextract_embedding(
+    face_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-run face embedding extraction for a face whose embedding_path is None."""
+    import asyncio
+    from app.config import settings
+    face = await face_service.get_face(db, face_id, current_user.id)
+    emb_dir = os.path.join(settings.uploads_faces, "embeddings")
+    emb_path = await asyncio.get_event_loop().run_in_executor(
+        None, face_service._extract_and_save_embedding, face.photo_path, emb_dir
+    )
+    face.embedding_path = emb_path
+    await db.commit()
+    await db.refresh(face)
+    if emb_path is None:
+        raise HTTPException(status_code=422, detail="未能从该照片中检测到人脸，请换一张清晰的正脸照")
+    return face
+
+
 @router.delete("/{face_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_face(
     face_id: int,

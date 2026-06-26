@@ -1,11 +1,11 @@
-import { DeleteOutlined, InboxOutlined } from '@ant-design/icons'
+import { DeleteOutlined, InboxOutlined, ReloadOutlined } from '@ant-design/icons'
 import {
-  Button, Col, Form, Input, Modal, Popconfirm, Row, Spin, Table, Typography, Upload, message
+  Button, Col, Form, Input, Modal, Popconfirm, Row, Table, Tag, Tooltip, Typography, Upload, message
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useEffect, useRef, useState } from 'react'
 import client from '../api/client'
-import { deleteFace, listFaces, uploadFace } from '../api/faces'
+import { deleteFace, listFaces, reextractFace, uploadFace } from '../api/faces'
 import type { Face } from '../api/types'
 
 function FacePhoto({ faceId }: { faceId: number }) {
@@ -35,6 +35,7 @@ export default function FacesPage() {
   const [form] = Form.useForm()
   const [uploading, setUploading] = useState(false)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [reextracting, setReextracting] = useState<number | null>(null)
 
   useEffect(() => {
     listFaces()
@@ -45,6 +46,19 @@ export default function FacesPage() {
   const handleDelete = async (id: number) => {
     await deleteFace(id)
     setFaces((prev) => prev.filter((f) => f.id !== id))
+  }
+
+  const handleReextract = async (id: number) => {
+    setReextracting(id)
+    try {
+      const res = await reextractFace(id)
+      setFaces((prev) => prev.map((f) => (f.id === id ? res.data : f)))
+      message.success('人脸特征提取成功')
+    } catch {
+      message.error('未检测到人脸，请换一张清晰的正脸照片')
+    } finally {
+      setReextracting(null)
+    }
   }
 
   const handleUpload = async (values: { person_name: string }) => {
@@ -74,18 +88,43 @@ export default function FacesPage() {
     },
     { title: '人员姓名', dataIndex: 'person_name' },
     {
+      title: '特征状态',
+      dataIndex: 'embedding_path',
+      width: 120,
+      render: (v: string | null) =>
+        v ? (
+          <Tag color="green">已提取</Tag>
+        ) : (
+          <Tooltip title="人脸特征未提取，识别将不生效。请点击重新提取，或换一张清晰正脸照重新上传。">
+            <Tag color="red" style={{ cursor: 'help' }}>未提取</Tag>
+          </Tooltip>
+        ),
+    },
+    {
       title: '上传时间',
       dataIndex: 'created_at',
       render: (v: string) => new Date(v).toLocaleString('zh-CN'),
     },
     {
       title: '操作',
+      width: 120,
       render: (_, record) => (
-        <Popconfirm title="确认删除该人脸？" onConfirm={() => handleDelete(record.id)}>
-          <Button size="small" danger icon={<DeleteOutlined />} />
-        </Popconfirm>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {!record.embedding_path && (
+            <Tooltip title="重新提取人脸特征">
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                loading={reextracting === record.id}
+                onClick={() => handleReextract(record.id)}
+              />
+            </Tooltip>
+          )}
+          <Popconfirm title="确认删除该人脸？" onConfirm={() => handleDelete(record.id)}>
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        </div>
       ),
-      width: 80,
     },
   ]
 

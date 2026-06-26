@@ -11,3 +11,4 @@ export const uploadFace = (personName: string, file: File) => {
 export const updateFace = (id: number, personName: string) =>
   client.patch<Face>(`/faces/${id}`, { person_name: personName })
 export const deleteFace = (id: number) => client.delete(`/faces/${id}`)
+export const reextractFace = (id: number) => client.post<Face>(`/faces/${id}/reextract`)
