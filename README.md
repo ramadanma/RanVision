@@ -98,7 +98,7 @@ trigger thread   — DB write + alert delivery         (I/O never blocks inferen
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/your-org/RanVision.git
+git clone https://github.com/ramadanma/RanVision.git
 cd RanVision
 cp docker-compose.example.yml docker-compose.yml
 # Edit docker-compose.yml — adjust host port mappings if needed

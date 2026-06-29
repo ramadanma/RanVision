@@ -104,7 +104,7 @@ trigger 线程   — 数据库写入 + 告警发送             （I/O 永不阻
 ### 1. 克隆并配置
 
 ```bash
-git clone https://github.com/your-org/RanVision.git
+git clone https://github.com/ramadanma/RanVision.git
 cd RanVision
 cp docker-compose.example.yml docker-compose.yml
 # 编辑 docker-compose.yml — 按需调整主机端口映射
